@@ -1,0 +1,5 @@
+website/node_modules/
+website/.docusaurus/
+website/build/
+website/.cache/
+website/*.log
