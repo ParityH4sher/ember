@@ -7,10 +7,16 @@ integrations/model calls and potentially untrusted engineering-runner traffic.
 Audit and authorize them separately. Runner logs must not be treated as the
 authoritative record of guest network activity.
 
+Continuous monitoring and alerting are required by the
+[gateway decision](../decisions/003-ai-gateway-shortlist.md#mandatory-monitoring-and-alerting).
+Collect flows continuously for host services and runners; the commands below are
+diagnostic spot checks.
+
 ## Define the traffic to account for
 
-Record the run ID, time window, workload/pod identity, source address, destination,
-port/protocol, DNS name when available, and allow/drop verdict.
+Record the run ID where applicable, time window, workload/process identity,
+source and destination addresses, port/protocol, direction, byte counts, DNS
+context when available, and allow/drop verdict.
 Distinguish workload traffic from launcher, provider, MCP, hook and telemetry traffic.
 An agent's tool history alone cannot account for connections made inside shell commands.
 
@@ -77,6 +83,10 @@ Use endpoints you control and run checks from the actual sandbox identity:
    intended policy.
 5. Check DNS, alternate resolvers, proxy bypass and redirects to unlisted destinations.
 6. Repeat after sandbox restart, credential renewal and policy changes.
+7. Trigger a configured destination or traffic-volume alert; verify its identity,
+   supporting flow records, and delivery to the configured notification channel.
+8. Interrupt collection or export and simulate dropped events; verify that
+   independent monitoring reports the resulting coverage gap.
 
 A connection timeout alone does not prove policy enforcement: the destination
 may simply be unavailable. Preserve the policy version and observed verdict.

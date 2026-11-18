@@ -87,6 +87,13 @@ Services may share one host. Model endpoints may run on that host or elsewhere. 
 - Account for concurrent in-flight requests when reserving budget; reconcile reservations against reported usage.
 - Keep provider credentials in the gateway.
 - Make fallback providers explicit; do not silently send data to another provider.
+- Export request and policy events to a system-wide audit stream.
+- Correlate gateway events with API, task, tool, process, filesystem, integration,
+  and network activity, including traffic outside the gateway.
+- Require configurable alerts for unapproved actions or destinations, abnormal
+  usage, failures, and lost monitoring coverage.
+
+See the [gateway monitoring requirements](decisions/003-ai-gateway-shortlist.md#mandatory-monitoring-and-alerting).
 
 ### Sandbox and permissions
 
@@ -120,7 +127,7 @@ S3 is an archive and backup destination, not the live agent workspace. Hosted in
 - Support reminders, morning briefs, research, and scheduled background work.
 - Add speech recognition and speech synthesis through replaceable local or hosted services.
 - Show transcripts and support interrupting spoken output; cancelling the underlying task is a separate action.
-- Show task completion, failures, reminders, and approval requests in a persistent notification inbox.
+- Show task completion, failures, monitoring alerts, reminders, and approval requests in a persistent notification inbox.
 - Offer web push where supported and permitted; retain notifications for clients that were offline.
 - Consider a PWA for installation and cached views; host-dependent actions still require a connection.
 - Use an optional paired desktop companion for local application control, overlays, and multi-monitor panels.

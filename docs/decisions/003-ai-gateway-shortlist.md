@@ -2,18 +2,18 @@
 sidebar_label: "003: AI gateway"
 ---
 
-# ADR 003: Defer AI gateway selection for Ember
+# ADR 003: Require activity monitoring and defer AI gateway selection
 
 [Companion notes](../README.md) · [Sandboxing](../sandboxing/README.md)
 
 **Date:** 2026-11-18  
-**Decision:** Do not select a gateway for the initial Ember prototype. Build a small provider-adapter boundary first; compare LiteLLM, agentgateway and Bifrost only when a concrete operational need appears.  
-**Evidence:** Upstream project and feature documentation reviewed 2026-11-18; no software installed or benchmarked.
+**Decision:** Require system-wide activity monitoring and alerting. Keep gateway selection open; use a provider adapter only if it integrates with the required monitoring.  
+**Candidate evidence:** Upstream project and feature documentation reviewed 2026-11-18; no software installed or benchmarked.
 
 ## Recommendation
 
-If Ember demonstrates the need for centralized model routing, provider credential
-isolation, budget attribution or policy enforcement, compare:
+Compare gateway candidates for model routing, credential isolation, budget
+attribution, policy enforcement, and integration with system-wide monitoring:
 
 1. **LiteLLM** — broad provider support, routing/failover, virtual keys and spend
    budgets; likely the most direct general-purpose proxy pilot.
@@ -22,11 +22,39 @@ isolation, budget attribution or policy enforcement, compare:
 3. **Bifrost** — compare if a self-hosted dashboard, caching and bundled gateway
    features matter more than Kubernetes-native integration.
 
-These are not current implementation recommendations. Ember’s proposal does not
-yet establish multiple providers, concurrent users, model credential brokering,
-or a need for a separately operated gateway. A gateway adds another privileged
-service and may log sensitive personal prompts, memory, calendar context or
-source code. It is not a replacement for task sandboxing.
+Selection requires runtime qualification. Monitoring and alerting are mandatory
+whether Ember uses a provider adapter or a dedicated gateway.
+
+## Mandatory monitoring and alerting
+
+- Record client API requests, task lifecycle events, model calls, tool execution,
+  spawned processes, file and data access, integration/device actions, and
+  configuration or permission changes.
+- Continuously observe allowed and denied network activity from Ember host
+  services, sandboxes, plugins, and desktop companions, including traffic that
+  bypasses the gateway. Capture connection metadata, byte counts, and available
+  DNS context.
+- Correlate events by timestamp, component/workload identity, operation, target,
+  outcome, and policy verdict. Include user, agent, session, and task IDs where
+  applicable; retain unattributed events and flag attribution gaps.
+- Collect primary audit records outside agent-controlled workspaces. Define
+  retention and access rules, redact credentials, and configure payload capture
+  explicitly.
+- Alert on unapproved destinations or actions, authentication and permission
+  failures, abnormal traffic volume, cost/resource thresholds, and repeated
+  execution failures.
+- Make alert rules, thresholds, severity, and delivery channels configurable.
+  Show alerts in the notification inbox and deliver them through configured
+  channels, with the triggering rule, affected component/task, and audit evidence.
+- Independently monitor collector health, dropped events, export backlogs, audit
+  tampering, and notification delivery failures. Report gaps in coverage and use
+  a fallback notification channel when configured.
+
+The gateway observes routed requests. Host, runtime, filesystem, and network
+instrumentation must cover other activity. Document observation points and blind
+spots, including encrypted payloads and unavailable remote-service internals.
+See [network auditing](../sandboxing/network-auditing.md) for capture points and
+verification.
 
 ## Conditional comparison
 
@@ -52,16 +80,17 @@ source code. It is not a replacement for task sandboxing.
 ## Gate for introducing a gateway
 
 First establish a narrow Ember-owned provider interface and store provider
-credentials in the host-side secret store. Add a gateway only if requirements
-such as multi-provider routing, per-agent budgets, key isolation, centralized
-model policy or reliable telemetry cannot be met proportionately in that layer.
-Avoid building a gateway merely because the project may someday use MCP or
-Kubernetes.
+credentials in the host-side secret store. The adapter must export request and
+policy events into the monitoring system. Add a dedicated gateway when routing,
+governance, or telemetry requirements cannot be met proportionately in that layer.
+Monitoring and alerting must be present in either design.
 
 Before selecting one, decide:
 
 - Whether it handles only model API traffic or also MCP; keep those trust
   boundaries and credentials distinct.
+- Which events it exports, which require independent collectors, and how the
+  combined system demonstrates monitoring coverage and alert delivery.
 - Whether provider secrets stay outside engineering-runner guests and how
   requests are attributed to user, conversation, task and agent.
 - Which prompt/response fields are logged, retained, redacted and accessible;
@@ -73,7 +102,7 @@ Before selecting one, decide:
 - The minimum deployment and maintenance burden acceptable for a self-hosted
   single-user system.
 
-## Suggested pilot (only after the gate is met)
+## Qualification pilot
 
 Do not enable semantic caching initially. First test routing and governance with
 a mock/local provider, then controlled real-provider calls:
@@ -92,6 +121,10 @@ a mock/local provider, then controlled real-provider calls:
    recovery, and (if required) HA. Record licensing for every feature.
 7. Add MCP only if centralized tool auth/allowlists are needed. Validate caller
    identity propagation and ensure tool-service credentials never reach the model.
+8. Exercise model, process, file, integration, and network actions; verify
+   correlated audit records, including traffic that bypasses the gateway.
+9. Trigger policy denials and usage thresholds; verify alerts. Interrupt a
+   collector and a notification channel; verify gap detection and delivery recovery.
 
 Use gateway rate/budget enforcement as an additional control, not as the only
 protection against runaway work. Apply workload-level timeouts, concurrency
@@ -99,9 +132,8 @@ limits and a hard external spend alert/cap where provider billing allows.
 
 ## Candidate by future project shape
 
-- **Initial single-user Ember prototype:** use a minimal provider adapter;
-  direct provider configuration is simpler unless credential isolation or
-  accounting is already a demonstrated requirement.
+- **Initial single-user Ember prototype:** use a minimal provider adapter only
+  when it integrates with the required activity monitoring and alerting.
 - **Kubernetes service with OIDC and MCP policy:** trial agentgateway first,
   while documenting the Kubernetes-mode budget limitation.
 - **Self-hosted gateway with built-in cache/UI/MCP:** trial Bifrost, after a
