@@ -41,6 +41,27 @@ Edit files under `docs/`; the browser updates automatically. Polling handles
 bind-mounted file changes. Rebuild the container after changing its configuration
 or Containerfile. Restart it after dependency changes to reinstall from the lockfile.
 
+### Troubleshooting stale Docusaurus paths
+
+If compilation reports missing modules under a different workspace path—for
+example, generated files refer to `/home/.../website/node_modules` while the
+container is running under `/workspaces/ember`—Docusaurus has stale generated
+`.docusaurus` state from another environment. Stop the docs server, clear the
+generated cache, reinstall dependencies in the environment where the server
+runs, and start it again:
+
+```sh
+cd /workspaces/ember
+npm --prefix website run clear
+npm --prefix website ci
+npm --prefix website start
+```
+
+Run these commands inside the devcontainer. For local development outside the
+container, use the equivalent commands from the repository root in that local
+environment. Do not share `node_modules` between host and container; native
+modules and generated absolute paths can be environment-specific.
+
 ## Local development
 
 With Node.js 24 or newer, run these commands from the repository root:

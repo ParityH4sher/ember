@@ -1,7 +1,9 @@
 # Ember
 
-Self-hosted personal assistant and engineering workspace. See the
-[project proposal](docs/IDEA.md) and [documentation index](docs/README.md).
+Self-hosted AI design and fabrication workspace: connect design tools, workshop
+machines, and physical interfaces to help turn ideas into real artifacts. See the
+[project proposal](docs/IDEA.md), [inspiration list](docs/inspiration.md), and
+[documentation index](docs/README.md).
 
 ## Documentation preview
 

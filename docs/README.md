@@ -7,8 +7,9 @@ sidebar_position: 1
 # Ember documentation
 
 Decision records and sandbox design notes for the Ember proposal in
-[IDEA.md](IDEA.md). Ember is a self-hosted personal assistant and engineering
-workspace; these are proposals, not implemented capabilities.
+[IDEA.md](IDEA.md). Ember is proposed as a self-hosted AI design and fabrication
+workspace; these are proposals, not implemented capabilities. See the
+[inspiration list](inspiration.md) for related projects and products.
 
 All project documentation and planning live under `docs/` and are served by
 Docusaurus. See the [documentation workflow](documentation.md) for the
@@ -22,6 +23,13 @@ Start with the [sandboxing overview](sandboxing/README.md), then choose a topic:
 - [Kubernetes sandboxes](sandboxing/kubernetes.md): runtimes, identity, volumes and network policy.
 - [Network auditing](sandboxing/network-auditing.md): capture points, flow logs and verification.
 - [Filesystem scope](sandboxing/filesystem-scope.md): mount allowlists, scratch space and artifacts.
+
+## Product direction
+
+- [Inspiration](inspiration.md): design tools, fabrication systems, workshop
+  integrations, physical interfaces, and related AI workspaces.
+- [Agent project contract](agent-project-contract.md): portable project
+  definitions, artifact formats, and requirements for agent work and reporting.
 
 ## Implementation policy
 
