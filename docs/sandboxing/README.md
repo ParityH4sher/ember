@@ -15,6 +15,7 @@ put both roles in one broadly privileged agent process.
 | [Kubernetes](kubernetes.md) | How could a later multi-node deployment isolate runner jobs? |
 | [Network auditing](network-auditing.md) | How to audit runner and host-service egress separately. |
 | [Filesystem scope](filesystem-scope.md) | How project workspaces differ from Ember memory and personal data. |
+| [Architecture proposal](architecture-proposal.md) | Cross-cutting security model, review notes, and staged implementation plan. |
 
 ## Choose the execution boundary
 

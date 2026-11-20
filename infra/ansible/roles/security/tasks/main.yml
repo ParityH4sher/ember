@@ -1,0 +1,24 @@
+---
+- name: Ensure UFW permits SSH before enabling firewall
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: Deny incoming traffic by default
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Allow outgoing traffic by default
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Enable firewall
+  community.general.ufw:
+    state: enabled
+
+- name: Enable unattended security upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present

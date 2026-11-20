@@ -5,6 +5,8 @@ const config = {
   url: process.env.DOCS_URL || 'http://localhost:3000',
   baseUrl: process.env.DOCS_BASE_URL || '/',
   trailingSlash: true,
+  staticDirectories: ['static', '../contracts'],
+  clientModules: ['./src/clientModules/d3-transition.js'],
   onBrokenLinks: 'throw',
   onBrokenAnchors: 'throw',
   onDuplicateRoutes: 'throw',

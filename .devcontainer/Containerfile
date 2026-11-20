@@ -1,5 +1,17 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:24-bookworm
 
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ansible \
+        make \
+        python3 \
+        python3-pip \
+        sshpass \
+        yamllint \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 USER node
 WORKDIR /workspaces/ember
 CMD ["bash", ".devcontainer/start-docs.sh"]

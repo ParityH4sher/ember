@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#161b22">
+    <title>Ember</title>
+    <style>
+      :root { color-scheme: dark; font: 16px system-ui, sans-serif; }
+      body { margin: 0; background: #0d1117; color: #e6edf3; }
+      main { max-width: 900px; margin: 10vh auto; padding: 2rem; }
+      h1 { font-size: 2.5rem; margin-bottom: .25rem; }
+      p { color: #9da7b3; line-height: 1.6; }
+      .card { margin-top: 2rem; padding: 1.5rem; border: 1px solid #30363d;
+        border-radius: 12px; background: #161b22; }
+      #status { color: #f0b44c; }
+      #status.ok { color: #3fb950; }
+      code { color: #79c0ff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Ember</h1>
+      <p>A self-hosted workspace for turning ideas into engineered artifacts.</p>
+      <section class="card" aria-live="polite">
+        <strong>Core API:</strong> <span id="status">checking…</span>
+        <p>This is an early platform scaffold. Project and task workflows are not implemented yet.</p>
+      </section>
+    </main>
+    <script>
+      fetch('/api/healthz').then(response => {
+        if (!response.ok) throw new Error('API returned ' + response.status);
+        return response.json();
+      }).then(data => {
+        const status = document.querySelector('#status');
+        status.textContent = `${data.status} (version ${data.version})`;
+        status.classList.add('ok');
+      }).catch(() => {
+        document.querySelector('#status').textContent = 'unavailable';
+      });
+    </script>
+  </body>
+</html>

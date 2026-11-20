@@ -1,0 +1,9 @@
+---
+- name: Configure Ember hosts
+  hosts: ember_hosts
+  become: true
+  roles:
+    - base
+    - security
+    - container-runtime
+    - ember

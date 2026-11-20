@@ -1,0 +1,50 @@
+---
+- name: Create Ember deployment directory
+  ansible.builtin.file:
+    path: "{{ ember_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create deployment configuration directory
+  ansible.builtin.file:
+    path: "{{ ember_install_dir }}/deploy"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy API source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../apps/api/"
+    dest: "{{ ember_install_dir }}/apps/api/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Copy frontend source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../apps/frontend/"
+    dest: "{{ ember_install_dir }}/apps/frontend/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Install Compose manifest
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../deploy/compose.yaml"
+    dest: "{{ ember_install_dir }}/deploy/compose.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Build and start Ember services
+  community.docker.docker_compose_v2:
+    project_src: "{{ ember_install_dir }}"
+    files:
+      - deploy/compose.yaml
+    state: present
+    build: always
+  environment:
+    EMBER_HTTP_PORT: "{{ ember_http_port | string }}"

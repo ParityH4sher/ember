@@ -1,0 +1,45 @@
+name: Build and test Ember
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+      - run: go test ./...
+        working-directory: apps/api
+
+  bundle:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble portable Compose bundle
+        run: |
+          set -euo pipefail
+          version="${GITHUB_SHA::12}"
+          bundle="ember-${version}"
+          mkdir -p "dist/${bundle}/apps" "dist/${bundle}/deploy"
+          cp -R apps/api apps/frontend "dist/${bundle}/apps/"
+          cp deploy/compose.yaml "dist/${bundle}/deploy/"
+          cp deploy/install.sh "dist/${bundle}/install.sh"
+          cp README.md "dist/${bundle}/"
+          chmod +x "dist/${bundle}/install.sh"
+          tar -C dist -czf "dist/${bundle}.tar.gz" "${bundle}"
+          sha256sum "dist/${bundle}.tar.gz" > "dist/${bundle}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ember-compose-bundle
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 30

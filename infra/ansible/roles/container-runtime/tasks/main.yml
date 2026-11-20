@@ -1,0 +1,15 @@
+---
+- name: Install distribution container engine and Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable Docker service
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started

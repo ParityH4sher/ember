@@ -141,6 +141,8 @@ S3 is an archive and backup destination, not the live agent workspace. Hosted in
 ## Studio interface and assistance
 
 - Provide a responsive workspace for desktop, tablet, and phone, organized around projects and making workflows.
+- Support internationalization so users can choose the interface language, with translated UI strings kept separate from application logic.
+- Include multiple built-in themes and allow users to customize the interface by installing community-provided CSS. Treat third-party CSS as untrusted styling, not as an extension or security boundary.
 - Present design files, previews, machine readiness and status, job history, and approval requests alongside assistant chat.
 - Support useful physical interfaces such as a desk-mounted touchscreen or planning display for sketches, project plans, previews, and machine status.
 - Keep chat, shortcuts, calendar, and to-dos available as supporting tools rather than the primary product structure.

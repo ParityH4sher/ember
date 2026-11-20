@@ -1,7 +1,13 @@
 {
-  "name": "Ember documentation",
+  "name": "Ember development",
   "build": {
     "dockerfile": "Containerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.24"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "overrideCommand": false,
   "remoteUser": "node",
@@ -24,5 +30,28 @@
     "CHOKIDAR_USEPOLLING": "true",
     "CHOKIDAR_INTERVAL": "1000",
     "WATCHPACK_POLLING": "1000"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.vscode-github-actions",
+        "GitHub.vscode-pull-request-github",
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "redhat.ansible",
+        "redhat.vscode-yaml",
+        "42Crunch.vscode-openapi",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": true,
+        "go.useLanguageServer": true,
+        "yaml.validate": true,
+        "files.trimTrailingWhitespace": true,
+        "editor.formatOnSave": true
+      }
+    }
   }
 }

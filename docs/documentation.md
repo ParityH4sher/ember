@@ -32,10 +32,16 @@ For VS Code, install the Dev Containers extension, set
 `"dev.containers.dockerPath": "podman"` in **User Settings (JSON)**, then run
 **Dev Containers: Reopen in Container**.
 
-The container provides Node.js 24 and maps the host user to the container's
-`node` user with Podman's `keep-id` namespace. The workspace mount supports shared
-SELinux labeling. Port 3000 is published on host loopback and configured for editor
-forwarding.
+The container provides Node.js 24, Go 1.24, Ansible, Python, Make, and GitHub CLI.
+It maps the host user to the container's `node` user with Podman's `keep-id`
+namespace. The workspace mount supports shared SELinux labeling. Port 3000 is
+published on host loopback and configured for editor forwarding.
+
+VS Code installs extensions for GitHub Actions and pull requests, Go, Docker
+file editing, Ansible, YAML, OpenAPI, Markdown linting/preview, and EditorConfig.
+The Docker extension provides Compose editing support; the container does not
+mount a Docker/Podman socket or run privileged containers. Run Compose against
+your host runtime separately when needed.
 
 Edit files under `docs/`; the browser updates automatically. Polling handles
 bind-mounted file changes. Rebuild the container after changing its configuration
