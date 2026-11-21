@@ -1,0 +1,4 @@
+{{ ember_project_name | to_json }}
+{% for file in ember_inputs.files | sort(attribute='path', case_sensitive=true) %}
+{{ file.checksum }} {{ file.mode }} {{ file.path | to_json }}
+{% endfor %}

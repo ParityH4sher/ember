@@ -2,7 +2,7 @@
 - name: Require supported Debian-family host
   ansible.builtin.assert:
     that:
-      - ansible_os_family == "Debian"
+      - ansible_facts['os_family'] == "Debian"
     fail_msg: "The initial Ansible roles support Debian/Ubuntu hosts only."
 
 - name: Install base packages

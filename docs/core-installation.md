@@ -23,8 +23,7 @@ with a working Compose provider. The host needs network access to fetch base
 images during the initial build. No database, model provider, agent runtime,
 CAD tool, plugin, or external account is required by this scaffold.
 
-Install from a deployment bundle using `./install.sh`, or start the stack from
-the repository root:
+Use `./install.sh` from the extracted bundle root, or run from the repository root:
 
 ```sh
 docker compose -f deploy/compose.yaml up --build -d

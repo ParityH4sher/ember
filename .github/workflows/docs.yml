@@ -5,6 +5,14 @@ on:
     branches: [main]
     paths:
       - docs/**
+      - contracts/**
+      - website/**
+      - .nvmrc
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - docs/**
+      - contracts/**
       - website/**
       - .nvmrc
       - .github/workflows/docs.yml
@@ -15,7 +23,7 @@ permissions:
   pages: read
 
 concurrency:
-  group: github-pages
+  group: github-pages-${{ github.event.pull_request.number || 'publish' }}
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +41,7 @@ jobs:
           cache-dependency-path: website/package-lock.json
 
       - name: Read GitHub Pages configuration
+        if: github.event_name != 'pull_request'
         id: pages
         uses: actions/configure-pages@v6
 
@@ -43,14 +52,21 @@ jobs:
         run: npm --prefix website run build
         env:
           DOCS_URL: ${{ steps.pages.outputs.origin }}
-          DOCS_BASE_URL: ${{ steps.pages.outputs.base_path }}/
+          DOCS_BASE_URL: ${{ github.event_name == 'pull_request' && '/ember' || steps.pages.outputs.base_path }}/
+
+      - name: Verify published contract files match the originals
+        run: |
+          cmp contracts/openapi.yaml website/build/openapi.yaml
+          cmp contracts/project-schema/v1.schema.json website/build/project-schema/v1.schema.json
 
       - name: Upload site
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
           path: website/build
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:

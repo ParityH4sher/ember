@@ -39,12 +39,45 @@
     group: root
     mode: "0644"
 
-- name: Build and start Ember services
+- name: Fingerprint installed build inputs
+  ansible.builtin.find:
+    paths:
+      - "{{ ember_install_dir }}/apps"
+      - "{{ ember_install_dir }}/deploy"
+    recurse: true
+    hidden: true
+    file_type: file
+    get_checksum: true
+  register: ember_inputs
+
+- name: Compare inputs with the last successfully deployed set
+  ansible.builtin.template:
+    src: build-inputs.j2
+    dest: "{{ ember_install_dir }}/.build-inputs"
+    owner: root
+    group: root
+    mode: "0600"
+  check_mode: true
+  register: ember_build_needed
+
+- name: Reconcile Ember services
   community.docker.docker_compose_v2:
-    project_src: "{{ ember_install_dir }}"
+    project_src: "{{ ember_install_dir }}/deploy"
+    project_name: "{{ ember_project_name }}"
     files:
-      - deploy/compose.yaml
+      - compose.yaml
     state: present
-    build: always
+    build: "{{ 'always' if ember_build_needed.changed else 'policy' }}"
+    wait: true
+    wait_timeout: 90
   environment:
     EMBER_HTTP_PORT: "{{ ember_http_port | string }}"
+
+- name: Record successfully deployed build inputs
+  ansible.builtin.template:
+    src: build-inputs.j2
+    dest: "{{ ember_install_dir }}/.build-inputs"
+    owner: root
+    group: root
+    mode: "0600"
+  when: ember_build_needed.changed

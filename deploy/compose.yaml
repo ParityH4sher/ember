@@ -3,7 +3,7 @@ name: ember
 services:
   api:
     build:
-      context: ./apps/api
+      context: ../apps/api
     environment:
       EMBER_LISTEN_ADDR: 0.0.0.0:8080
     read_only: true
@@ -22,7 +22,7 @@ services:
 
   frontend:
     build:
-      context: ./apps/frontend
+      context: ../apps/frontend
     depends_on:
       - api
     cap_drop:
@@ -39,6 +39,12 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${EMBER_HTTP_PORT:-3000}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8080/api/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     networks:
       - backend
 

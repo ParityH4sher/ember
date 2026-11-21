@@ -1,0 +1,4 @@
+---
+ember_install_dir: /opt/ember
+ember_http_port: 3000
+ember_project_name: ember

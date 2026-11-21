@@ -9,6 +9,11 @@
       "version": "1.4.1",
       "resolved": "ghcr.io/devcontainers/features/go@sha256:2f2ed290df9a5f1841340b14cb8a287cf0574a816967dd84dcfe42fdd97b897e",
       "integrity": "sha256:2f2ed290df9a5f1841340b14cb8a287cf0574a816967dd84dcfe42fdd97b897e"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "1.8.1",
+      "resolved": "ghcr.io/devcontainers/features/python@sha256:7b35df4ff12f378effab187341b1b1b2373de6dd6d027d87aa77dd246c62b517",
+      "integrity": "sha256:7b35df4ff12f378effab187341b1b1b2373de6dd6d027d87aa77dd246c62b517"
     }
   }
 }

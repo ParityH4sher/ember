@@ -13,6 +13,11 @@ paths:
       responses:
         "200":
           description: API process is running
+          headers:
+            X-Request-ID:
+              description: Server-generated identifier for correlating the response with the API access log.
+              schema:
+                type: string
           content:
             application/json:
               schema:

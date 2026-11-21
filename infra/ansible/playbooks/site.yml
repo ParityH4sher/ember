@@ -1,4 +1,17 @@
 ---
+- name: Check supported Ansible controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require ansible-core supported by the pinned collections
+      ansible.builtin.assert:
+        that:
+          - ansible_version.full is version('2.19', '>=')
+        fail_msg: >-
+          This playbook requires ansible-core 2.19 or newer for the pinned
+          community.general 14.x and community.docker 5.x collections.
+
 - name: Configure Ember hosts
   hosts: ember_hosts
   become: true

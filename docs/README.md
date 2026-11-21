@@ -16,7 +16,13 @@ All project documentation and planning live under `docs/` and are served by
 Docusaurus. See the [documentation workflow](documentation.md) for the
 devcontainer and hot-reload setup.
 
-## Implemented platform scaffold
+## Where to start
+
+- Developers: [architecture overview](architecture/overview.md), [baseline evidence](architecture/current-state.md) and [testing strategy](engineering/testing-strategy.md).
+- Operators: [deployment](deployment.md), [operations](operations/README.md) and [release blockers](planning/risks.md).
+- Contributors and coding agents: [continuation checkpoint](progress/current-status.md), [roadmap](planning/roadmap.md) and [decisions requiring approval](planning/human-decisions.md).
+
+## Platform and design references
 
 - [Architecture](architecture/README.md): service boundaries, current status, and
   deployment portability.

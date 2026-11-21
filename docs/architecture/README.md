@@ -5,6 +5,10 @@ sidebar_position: 2
 
 # Ember architecture
 
+Start with the [engineering overview](overview.md) for the proposed component model,
+[verified baseline](current-state.md) for runtime and deployment evidence, and
+[decision register](../planning/human-decisions.md) for open commitments.
+
 Ember is a portable software platform, separate from the host and physical
 infrastructure on which it runs. The logical layers do not require separate
 machines or independently deployed services.
@@ -27,7 +31,8 @@ flowchart TB
 
 - `apps/api`: Go HTTP process exposing `GET /healthz`.
 - `apps/frontend`: static status page; Nginx proxies `/api/` to the API.
-- `deploy/compose.yaml`: runs the API and frontend on one host. The frontend is
+- `deploy/compose.yaml`: defines the API and frontend on one host. Both build
+  contexts are relative to this manifest. The frontend is
   published on loopback by default at `http://127.0.0.1:3000`.
 - `infra/ansible`: initial Debian/Ubuntu host preparation and Compose deployment.
 - `contracts/openapi.yaml`: contract for the implemented health endpoint.

@@ -32,7 +32,10 @@ For VS Code, install the Dev Containers extension, set
 `"dev.containers.dockerPath": "podman"` in **User Settings (JSON)**, then run
 **Dev Containers: Reopen in Container**.
 
-The container provides Node.js 24, Go 1.24, Ansible, Python, Make, and GitHub CLI.
+The container requests Node.js 24 and Go 1.27.4 and includes distribution
+Ansible, Python, Make, and GitHub CLI. Use the
+[qualified Ansible controller](operations/README.md#ansible-host-provisioning)
+for provisioning; the devcontainer's distribution Ansible may be older.
 It maps the host user to the container's `node` user with Podman's `keep-id`
 namespace. The workspace mount supports shared SELinux labeling. Port 3000 is
 published on host loopback and configured for editor forwarding.
@@ -113,8 +116,10 @@ The default URL after deployment is <https://parityh4sher.github.io/ember/>.
 2. Commit and push the documentation, website files, lockfile, and workflow to `main`.
 3. Check **Actions → Deploy documentation** for the deployment result.
 
-Changes to `docs/`, `website/`, `.nvmrc`, or the workflow trigger deployment on
-`main`. Use **Run workflow** on `main` to deploy manually.
+Changes to `docs/`, `contracts/`, `website/`, `.nvmrc`, or the workflow trigger deployment on
+`main`. Pull requests touching those inputs build the site and check that the
+published contracts match their sources, without uploading or deploying the
+site. Use **Run workflow** on `main` to deploy manually.
 
 The workflow reads the Pages origin and path, including the `/ember/` prefix,
 and uses the built-in `GITHUB_TOKEN`. No deployment key is required.

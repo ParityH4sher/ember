@@ -10,7 +10,7 @@ and [documentation index](docs/README.md).
 
 The API is an initial platform scaffold. Build it locally with Go 1.24 or download
 the portable Compose bundle from the **Actions** tab. On a server with Docker
-Compose v2 or Podman Compose, unpack the bundle and run:
+Compose v2 or Podman Compose, unpack the bundle and run from its root:
 
 ```sh
 ./install.sh
@@ -28,7 +28,7 @@ be added behind the documented platform boundaries.
 
 ```text
 apps/                 User-facing applications and the core API
-services/             Independently deployable workers and adapters
+services/             Proposed worker and adapter contracts (no running workers)
 contracts/            API and portable project format contracts
 deploy/               Compose deployment and host install tooling
 infra/ansible/        Host provisioning and baseline configuration

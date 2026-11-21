@@ -221,6 +221,33 @@ operation is implemented, and no unintended public operation is exposed.
 
 ## MCP/plugin authoring and approval workflow
 
+### Connection lifecycle proposed for the first read-only adapter
+
+Keep four records distinct: the **definition** (reviewed adapter code and
+version), **connection** (instance-owned origin and secret reference),
+**grant** (who may perform a capability on that connection), and optional
+**ownership record** (who may administer the upstream service). Removing one
+instance's connection must not remove the definition or the service.
+
+Register an explicit connection as *disabled*. Validate compatibility, origin
+and exact capability mapping before enabling it. A health probe should be a
+bounded, read-only call with separate reachability, authentication and upstream
+version results. A failed probe marks the connection degraded; it must not
+restart the upstream, broaden credentials or prevent the API serving unrelated
+requests. On disable or revocation reject new calls, fence in-flight results,
+close streams and release the connection's secret handle.
+
+Prefer request/response reads initially. Before accepting webhooks, map a
+verified publisher and subscription to an instance **on the server**, verify a
+signature and timestamp on bounded bytes, deduplicate event IDs, handle
+out-of-order delivery and revoke the subscription independently. A tenant ID
+in a payload is not routing authority. Validate MCP tool schemas/version on
+upgrade; quarantine newly discovered or changed capabilities until reviewed.
+An adapter that requires executable third-party code needs a separately approved
+runtime boundary, not dynamic loading into `apps/api`.
+
+### Reviewing an MCP server
+
 For each MCP server or plugin Ember adopts:
 
 1. Identify the publisher, source repository, package/image, exact version, and

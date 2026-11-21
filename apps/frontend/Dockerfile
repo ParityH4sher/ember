@@ -1,4 +1,6 @@
-FROM nginx:1.27-alpine
+FROM nginx:1.30.7-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
+ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    NGINX_ENVSUBST_FILTER=^NGINX_LOCAL_RESOLVERS$
 COPY index.html /usr/share/nginx/html/index.html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 EXPOSE 8080
