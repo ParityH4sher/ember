@@ -133,3 +133,84 @@ define `BUILDPLATFORM`; the `container-runtime` role installs `docker-buildx`.
 
 To roll back, set `ember_image_source: build` in the inventory. The Dockerfile
 change is independent.
+
+### First publish from GitHub (2026-11-22)
+
+Commit 755b647 on `main` published all four images. Read anonymously with
+`docker buildx imagetools inspect ghcr.io/parityh4sher/ember-<service>:latest`,
+each index:
+
+- covers `linux/amd64` and `linux/arm64`, plus provenance attestations;
+- carries `org.opencontainers.image.source=https://github.com/ParityH4sher/ember`
+  and the commit as `org.opencontainers.image.revision`.
+
+The packages are public (DEC-008).
+
+With an empty Docker configuration, so the pull was anonymous, the following
+ran from a directory holding only `compose.yaml` and `compose.registry.yaml`
+on the same Fedora x86_64 workstation:
+
+```sh
+docker compose -f compose.yaml -f compose.registry.yaml up -d --pull always --no-build --wait
+```
+
+All four services became healthy. `/api/healthz` reported
+`755b647bd4541e785ab262101c3972c924553ae5`, and `/` and `/apps/notes/`
+returned 200. The test project, its volume and the pulled images were then
+removed. Still not run: a `site.yml` deploy on the Pi (arm64 pull, the Compose
+version guard against Ubuntu's package).
+
+## `stacks_root` undefined after the stack loop (2026-11-22)
+
+On the Pi, `stacks.yml` failed at "Check whether Authentik's administrator
+account is claimed" with `'stacks_root' is undefined`. `stacks_root` is a
+default of the `stack` role, which the playbook loads with `include_role`. An
+included role's defaults stay private to it, so the playbook task after the
+loop could not see them. Earlier local runs supplied `stacks_root` themselves,
+which hid this. Fix: `public: true` on the stack loop's `include_role`.
+
+Verified with ansible-core 2.22.0 and community.docker 5.4.0 in a root container
+on Fedora x86_64 (Docker Engine 29.10.0), against the host's Docker daemon:
+
+- A minimal role reproduces the exact error without `public` and resolves the
+  default with `public: true`.
+- The real `stacks.yml` ran with a localhost copy of the homelab inventory:
+  `example.test`, Authentik on loopback port 9095, a temporary `stacks_root`,
+  no `.env`, and `--skip-tags container-runtime`.
+  - Run 1 deployed Authentik healthy. The check reported `unclaimed`, and the
+    playbook stopped at the claim assertion as intended.
+  - After setting a password for `akadmin` with `ak shell`, run 2 passed the
+    check and deployed Traefik healthy. It then stopped at cloudflared's
+    missing `cloudflare_tunnel_token`, expected because the test had no `.env`.
+- The test projects, their volumes, the `tunnel` and `edge` networks, the
+  scratch files and the pulled images were removed afterwards.
+
+Not run: cloudflared with a real token, and anything on the Pi.
+
+## Public ingress reachable on the homelab Pi (2026-11-22)
+
+After the operator ran `stacks.yml` (twice, claiming `akadmin` in between) and
+`site.yml`, and created the Cloudflare tunnel routes (`ember-poc` and `auth` →
+HTTP `traefik:8081`), these requests from an outside workstation through
+Cloudflare succeeded:
+
+- `https://ember-poc.parityh4sher.org/` returned 200 with the Ember page.
+- `/api/healthz` reported version `755b647…`, the GHCR image deployed by
+  registry mode.
+- `/api/v1/auth/session` returned `{"authenticated":false,"enabled":true}`.
+- `https://auth.parityh4sher.org/` returned 302 to Authentik's authentication
+  flow.
+- `/application/o/ember/.well-known/openid-configuration` returned 200 with the
+  expected issuer.
+
+`auth` was tested with `curl --resolve`, because the LAN router still served a
+cached NXDOMAIN from before the record existed. The zone's negative TTL is
+1800 s. A browser sign-in round trip has not been tested.
+
+The same stale NXDOMAIN also reached the Pi. Until it expired, Ember's
+`/api/v1/auth/login` returned 503 `identity_provider_unavailable`, because the
+API could not resolve its issuer. Restarting the router did not clear it, which
+points to the router's upstream resolver. Once the router resolved `auth`
+again, three successive login requests returned 302 to
+`https://auth.parityh4sher.org/application/o/authorize/` with PKCE and the
+expected callback URL. No code change was needed.

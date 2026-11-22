@@ -1,6 +1,6 @@
 # ADR 011: Deploy prebuilt multi-arch images from the GitHub Container Registry
 
-Status: Accepted (implemented locally; the GitHub run and a Pi pull are not yet verified)  
+Status: Accepted (published from `main` since 755b647; a pull on the Pi is not yet verified)  
 Date: 2026-11-22  
 Scope: how the Ansible `ember` role obtains Ember's four images. The source
 bundle and `deploy/install.sh` still build on the host.
@@ -41,10 +41,10 @@ to revisit its verification practice if Ember started shipping prebuilt images.
   longer are, for this host.
 - `!reset` in the overlay needs Docker Compose 2.24.4 or newer; the role checks
   this.
-- Package visibility is open
-  ([DEC-008](../planning/human-decisions.md#dec-008---visibility-of-ember-container-images)).
-  Private packages need a `read:packages` token on the host, which Docker stores
-  unencrypted in root's configuration
+- The packages are public
+  ([DEC-008](../planning/human-decisions.md#dec-008---visibility-of-ember-container-images)),
+  so hosts need no credential. If they become private, each host needs a
+  `read:packages` token, which Docker stores unencrypted in root's configuration
   ([DEC-002](../planning/human-decisions.md#dec-002---identity-and-secret-custody)).
 - ADR 008's bundle checks still apply to the bundle. They say nothing about the
   registry images, which share only the Dockerfiles with it.

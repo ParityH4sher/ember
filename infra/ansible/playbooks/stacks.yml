@@ -97,9 +97,12 @@
     # such as Authentik attach their front container to `edge`.
     - role: ingress_networks
   tasks:
+    # `public` exposes the role's defaults, such as stacks_root, to the tasks
+    # below. Defaults of an included role are otherwise private to it.
     - name: Deploy each shared service stack
       ansible.builtin.include_role:
         name: stack
+        public: true
       loop: "{{ shared_stacks }}"
       loop_control:
         loop_var: stack

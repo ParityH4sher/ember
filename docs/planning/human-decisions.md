@@ -280,7 +280,7 @@ These are evaluation targets, not mandatory providers for every user.
 
 ## DEC-008 - Visibility of Ember container images
 
-Status: Open
+Status: Decided
 Priority: Medium
 
 ### Context
@@ -311,4 +311,5 @@ Repository visibility, DEC-002.
 The role logs in only when a token is supplied.
 
 ### Human Decision
-Pending.
+2026-11-22 — Project operator selected **A**: the four `ghcr.io/parityh4sher/ember-*`
+packages are public, so hosts pull them without credentials.
