@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Ember Project Notes",
+  "short_name": "Ember Notes",
+  "description": "Read, link, and edit Markdown notes in your Ember projects.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#10151b",
+  "theme_color": "#192129",
+  "icons": [
+    {"src": "icons/notes-192.png", "type": "image/png", "sizes": "192x192"},
+    {"src": "icons/notes-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable"}
+  ]
+}

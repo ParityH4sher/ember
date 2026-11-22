@@ -1,0 +1,26 @@
+# Optional overlay: run the prebuilt images that CI publishes (the `images` job
+# in .github/workflows/build.yml) instead of building on this host. The Ansible
+# ember role adds it when ember_image_source is `registry`. Without Ansible:
+#   export EMBER_IMAGE_REGISTRY=ghcr.io/<owner> EMBER_IMAGE_TAG=latest
+#   docker compose -f deploy/compose.yaml -f deploy/compose.registry.yaml pull
+#   docker compose -f deploy/compose.yaml -f deploy/compose.registry.yaml up -d --no-build
+# EMBER_IMAGE_TAG is `latest` (the newest main build) or `sha-<full commit>`.
+# `!reset` removes the build sections; it needs Docker Compose 2.24.4 or newer.
+# Every other setting (capabilities, limits, networks, volumes) comes from
+# compose.yaml, so both ways of deploying run the same containers.
+services:
+  api:
+    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-api:${EMBER_IMAGE_TAG:-latest}
+    build: !reset null
+
+  home:
+    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-home:${EMBER_IMAGE_TAG:-latest}
+    build: !reset null
+
+  notes:
+    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-notes:${EMBER_IMAGE_TAG:-latest}
+    build: !reset null
+
+  frontend:
+    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-gateway:${EMBER_IMAGE_TAG:-latest}
+    build: !reset null

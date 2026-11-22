@@ -12,7 +12,7 @@ import (
 
 func TestAccessLogCorrelatesWithoutRequestData(t *testing.T) {
 	var logs bytes.Buffer
-	handler := accessLog(slog.New(slog.NewJSONHandler(&logs, nil)), httpHandler())
+	handler := accessLog(slog.New(slog.NewJSONHandler(&logs, nil)), httpHandler(t))
 	var previousID string
 	for _, tc := range []struct {
 		path  string

@@ -15,4 +15,9 @@ Recorded against `76baa4c`. See [status](../progress/current-status.md) for reme
 | Medium | Lockfile-only `npm audit` for the website reported 26 affected packages (16 critical). Counts include transitive propagation and do not measure exploitability of the published static site. | Docs maintainer: triage build-time vs browser-shipped paths and update the affected dependency chain with review. Do not run a forced major upgrade as a side effect of API work. | Rebuild from lockfile, rerun audit, document residual exposure and regression-test Mermaid, links and API reference. |
 | Release gate | Durable storage, audit and worker isolation exist only on paper. Bad exports, missed revocation or incomplete restore could expose private files. | Data/runtime owners: approve storage and threat profile first. | Restore exercise, bounded export, grant expiry, failure recovery and independent policy evidence on actual execution platform. |
 
-The current API has no sensitive operations. Do not describe future mitigations as deployed controls. In particular, loopback binding is a useful exposure limit, not application authentication; a schema is not a filesystem boundary; ARM64 image availability is not a Pi qualification.
+The current API has no authenticated private-service operations, but the
+unauthenticated Weather operation makes outbound requests and accepts location
+coordinates. Keep it behind the loopback frontend; do not expose it to an
+untrusted network. Do not describe future mitigations as deployed controls.
+Loopback binding is an exposure limit, not application authentication; a schema
+is not a filesystem boundary; ARM64 image availability is not a Pi qualification.

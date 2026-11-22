@@ -1,6 +1,6 @@
 # Ember Compose source bundle
 
-This bundle contains a Go health API, the Nginx proxy/status page and their
+This bundle contains a Go API, the Home and Notes frontends, their Nginx gateway and
 Compose configuration. The source revision is in `apps/api/version.txt`.
 The target host builds the images; it needs Docker with Compose v2 or Podman
 with a compatible Compose provider and access to the pinned base images.

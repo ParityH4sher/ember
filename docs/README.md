@@ -39,14 +39,16 @@ devcontainer and hot-reload setup.
 - [Operations](operations/README.md): local Compose setup, Ansible provisioning,
   CI artifacts, and known operational limitations.
 - [Build and deploy](deployment.md): API bundle installation and requirements.
+- [Sign-in (OIDC)](authentication.md): optional OpenID Connect sign-in, its
+  configuration file, and provider setup.
 - [API reference](api-reference.md): hosted OpenAPI contract and interactive
   Swagger UI.
 - [POC implementation handoff](https://github.com/ParityH4sher/ember/blob/main/EMBER_POC_IMPLEMENTATION_BRIEF.md): detailed
   proposed scope, architecture, acceptance criteria, and agent instructions.
 
 The current implementation is intentionally small: a health-check API and a
-static frontend. AI, CAD, persistence, authentication, and task workflows are
-not implemented. Future service boundaries are documented in the repository
+static frontend. Sign-in is optional OpenID Connect, off by default. AI, CAD,
+authorization, and task workflows are not implemented. Future service boundaries are documented in the repository
 under `services/`.
 
 ## Sandboxing
@@ -64,6 +66,8 @@ Start with the [sandboxing overview](sandboxing/README.md), then choose a topic:
 
 - [Feature catalogue](feature-catalogue.md): the wished-for product capabilities,
   grouped by area and distinguished from what this repository implements today.
+- [Plugins](plugins.md): the list of wanted plugins and the Weather plugin as
+  the worked example for adding one.
 - [Gaps and improvements](gaps-and-improvements.md): prioritized lessons from
   the reference system, kept separate from this repository's implementation status.
 - [Inspiration](inspiration.md): design tools, fabrication systems, workshop

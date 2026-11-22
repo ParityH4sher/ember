@@ -1,0 +1,48 @@
+---
+# Creates the shared ingress networks as Docker *internal* networks: members can
+# reach each other, but nothing on them can reach the internet or the host's
+# other networks. The stack role and the ember role never remove them.
+
+- name: Inspect the shared ingress networks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - --format
+      - "{% raw %}{{.Internal}}{% endraw %}"
+      - "{{ item }}"
+  loop: "{{ ingress_network_names }}"
+  register: ingress_network_state
+  changed_when: false
+  failed_when: false
+
+- name: Create missing ingress networks
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - create
+      - --driver
+      - bridge
+      - --internal
+      - --label
+      - org.ember.ingress=true
+      - "{{ item.item }}"
+  loop: "{{ ingress_network_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+
+- name: Require existing ingress networks to be internal
+  ansible.builtin.assert:
+    that:
+      - item.rc != 0 or (item.stdout | trim) == 'true'
+    fail_msg: >-
+      Docker network {{ item.item }} already exists but is not internal, so its
+      members could reach the internet. Remove it (docker network rm
+      {{ item.item }}, after stopping the containers using it) and rerun.
+    quiet: true
+  loop: "{{ ingress_network_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"

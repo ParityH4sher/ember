@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ember.local/schemas/project/v1.notes.schema.json",
+  "title": "Ember v1 project with linked Markdown notes",
+  "description": "An optional profile of the portable project manifest. Notes remain ordinary source file entries.",
+  "$ref": "v1.schema.json",
+  "properties": {
+    "files": {
+      "allOf": [
+        { "contains": { "properties": { "path": { "const": "notes/index.md" } } }, "maxContains": 1 },
+        { "contains": { "properties": { "path": { "const": "notes/handoff.md" } } }, "maxContains": 1 }
+      ],
+      "items": {
+        "if": { "properties": { "path": { "pattern": "^notes/" } } },
+        "then": {
+          "properties": {
+            "path": { "pattern": "^notes/(?:(?!\\.)[^/\\\\:\\u0000-\\u001f]+/)*(?!\\.)[^/\\\\:\\u0000-\\u001f]+\\.md$" },
+            "mediaType": { "const": "text/markdown" },
+            "role": { "const": "source" }
+          }
+        }
+      }
+    }
+  }
+}

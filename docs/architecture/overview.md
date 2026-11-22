@@ -7,10 +7,18 @@ Ember is a self-hosted workspace for design and fabrication projects. Its purpos
 ```mermaid
 flowchart LR
   B[Browser] -->|loopback HTTP| F[Static page on Nginx]
-  F -->|GET /healthz| A[Go API]
+  F -->|/api proxy| A[Go API]
+  A -->|fixed Weather operation, when active| W[Open-Meteo]
 ```
 
-The browser requests `/api/healthz`; Nginx strips `/api` and uses Compose service DNS. The API reports its own process status, not the state of a worker, host or database. Ansible and the bundle installer are alternative setup paths, not runtime peers. See the [baseline and verification evidence](current-state.md) before attempting installation.
+The browser can reach `/api/healthz` and the versioned API through Nginx, which
+strips `/api` and uses Compose service DNS. The current static page only displays
+status; it does not yet render plugin operations. The API's example Weather
+adapter calls the fixed public Open-Meteo endpoint when activated. The API still
+has no authentication or durable state. Ansible and the bundle installer are
+alternative setup paths, not runtime peers. See the
+[baseline and verification evidence](current-state.md) before attempting
+installation.
 
 ## Proposed component model
 

@@ -1,0 +1,143 @@
+---
+- name: Select the supported Tailscale package repository distribution
+  ansible.builtin.set_fact:
+    tailscale_distribution: "{{ 'ubuntu' if ansible_facts['distribution'] == 'Ubuntu' else 'debian' }}"
+    tailscale_release: "{{ ansible_facts['distribution_release'] }}"
+
+- name: Install Tailscale repository signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/{{ tailscale_distribution }}/{{ tailscale_release }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the official Tailscale package repository
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/{{ tailscale_distribution }}/{{ tailscale_release }}.tailscale-keyring.list"
+    dest: /etc/apt/sources.list.d/tailscale.list
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Refresh APT metadata for the configured Tailscale repository
+  ansible.builtin.command:
+    argv:
+      - apt-get
+      - update
+  changed_when: false
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+
+- name: Enable and start Tailscale daemon
+  ansible.builtin.service:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Check whether this host is already enrolled in Tailscale
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - ip
+      - -4
+  register: tailscale_ipv4
+  changed_when: false
+  failed_when: false
+
+- name: Enroll this host using the supplied auth key
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--auth-key={{ tailscale_auth_key }}"
+  when:
+    - tailscale_auth_key | length > 0
+    - tailscale_ipv4.rc != 0
+  no_log: true
+
+- name: Recheck Tailscale enrollment after authentication
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - ip
+      - -4
+  register: tailscale_ipv4
+  changed_when: false
+  failed_when: false
+
+- name: Require successful Tailscale enrollment when an auth key was supplied
+  ansible.builtin.assert:
+    that:
+      - tailscale_ipv4.rc == 0
+    fail_msg: >-
+      Tailscale enrollment did not complete. Check the auth key and tailnet
+      approval settings; the key is intentionally hidden from task output.
+  when: tailscale_auth_key | length > 0
+
+- name: Check the current Tailscale Serve configuration
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - serve
+      - status
+  register: tailscale_serve_status
+  changed_when: false
+  failed_when: false
+  when: tailscale_ipv4.rc == 0
+
+- name: Publish the Ember frontend through private Tailscale Serve
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - serve
+      - --bg
+      - "http://127.0.0.1:{{ ember_http_port }}"
+  when:
+    - tailscale_ipv4.rc == 0
+    - (ingress_domain | default('')) | length == 0
+    - >-
+      ('http://127.0.0.1:' ~ (ember_http_port | string))
+      not in (tailscale_serve_status.stdout | default(''))
+  async: 60
+  poll: 2
+
+# With an ingress domain, Ember is published through the Cloudflare Tunnel
+# (playbooks/stacks.yml), and its public URL is the only origin where sign-in
+# works: sign-in cookies and redirects are bound to it. This role therefore no
+# longer publishes Ember through Serve. It does not delete Serve configuration,
+# which may hold other routes.
+- name: Point out a leftover Tailscale Serve route to Ember
+  ansible.builtin.debug:
+    msg: >-
+      Tailscale Serve still publishes Ember at its ts.net address, where
+      sign-in cannot complete. Remove it on the host with `sudo tailscale serve
+      reset` (this clears all Serve routes) once you have checked them with
+      `tailscale serve status`.
+  when:
+    - tailscale_ipv4.rc == 0
+    - (ingress_domain | default('')) | length > 0
+    - >-
+      ('http://127.0.0.1:' ~ (ember_http_port | string))
+      in (tailscale_serve_status.stdout | default(''))
+
+- name: Explain how to enroll a host without an auth key
+  ansible.builtin.debug:
+    msg: >-
+      Tailscale is installed but this host is not enrolled. Run `sudo tailscale
+      up` on the host, then rerun this playbook; it will configure Tailscale
+      Serve automatically.
+  when:
+    - tailscale_ipv4.rc != 0
+    - tailscale_auth_key | length == 0
+
+- name: Allow tailnet HTTPS to Tailscale Serve through UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: tailscale0
+    port: "443"
+    proto: tcp

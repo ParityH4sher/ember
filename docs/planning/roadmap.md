@@ -20,6 +20,12 @@ If an approval blocks a milestone, work on a preceding independent verification 
 
 ## POC versus later work
 
+**Current project priority: cross-run Markdown handoff.** First prove that a
+second disposable workspace can resume from an index, a short handoff and a
+linked topic after the first workspace is gone. Inspect the same notes as an
+Obsidian vault. The [operator CLI and note conventions](../agent-project-contract.md#linked-project-notes-and-resuming-a-task)
+are the starting point for runner integration. Thumbnail qualification is deferred.
+
 Near term: one private host, one API build, one real read-only integration after identity, two independent consumers. Verify service outage degrades the operation and never transfers ownership. The POC brief also proposes an allowlisted controller action; it requires DEC-006 and is not implied by a successful read.
 
 Later: independently scale runners, add qualified gateways and, if required, multi-node scheduling. Trigger this by observed queue age, saturation, inability to meet recovery objectives or an actual isolation requirement. A fleet manager, plugin marketplace, cross-instance federation, Kubernetes, paid inference and physical machine operation are not prerequisites to M1–M4.

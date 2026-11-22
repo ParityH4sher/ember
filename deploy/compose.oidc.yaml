@@ -1,0 +1,19 @@
+# Optional overlay: enable OpenID Connect sign-in on the API.
+# install.sh adds it when EMBER_AUTH_CONFIG_FILE is set. Without the installer:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml up -d
+# Set both variables to absolute host paths. The files must be readable by the
+# API container's user (UID 65532); see docs/authentication.md.
+services:
+  api:
+    environment:
+      EMBER_AUTH_CONFIG_FILE: /etc/ember/auth.json
+      EMBER_OIDC_CLIENT_SECRET_FILE: /run/secrets/ember-oidc-client-secret
+    volumes:
+      - type: bind
+        source: ${EMBER_AUTH_CONFIG_FILE:?set EMBER_AUTH_CONFIG_FILE to the host path of the OIDC JSON configuration}
+        target: /etc/ember/auth.json
+        read_only: true
+      - type: bind
+        source: ${EMBER_OIDC_CLIENT_SECRET_FILE:?set EMBER_OIDC_CLIENT_SECRET_FILE to the host path of the OIDC client secret}
+        target: /run/secrets/ember-oidc-client-secret
+        read_only: true

@@ -12,25 +12,35 @@
     },
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "overrideCommand": false,
+  "overrideCommand": true,
   "remoteUser": "node",
   "containerUser": "node",
   "updateRemoteUserUID": false,
   "runArgs": ["--userns=keep-id:uid=1000,gid=1000"],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/ember,type=bind,relabel=shared",
   "workspaceFolder": "/workspaces/ember",
+  "mounts": [
+    "type=volume,source=ember-web-modules-${devcontainerId},target=/workspaces/ember/apps/frontends/web/node_modules",
+    "type=volume,source=ember-web-kit-${devcontainerId},target=/workspaces/ember/apps/frontends/web/.svelte-kit",
+    "type=volume,source=ember-docs-modules-${devcontainerId},target=/workspaces/ember/website/node_modules"
+  ],
   "remoteEnv": {
     "PATH": "/home/node/.venvs/ember-ansible/bin:${containerEnv:PATH}"
   },
-  "postCreateCommand": "bash .devcontainer/setup-ansible.sh",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "init": true,
-  "appPort": ["127.0.0.1:3000:3000"],
-  "forwardPorts": [3000],
+  "appPort": ["127.0.0.1:3000:3000", "127.0.0.1:5173:5173"],
+  "forwardPorts": [3000, 5173],
   "portsAttributes": {
     "3000": {
       "label": "Ember docs",
       "protocol": "http",
       "onAutoForward": "openBrowser"
+    },
+    "5173": {
+      "label": "Ember web (Vite)",
+      "protocol": "http",
+      "onAutoForward": "notify"
     }
   },
   "containerEnv": {
@@ -44,6 +54,7 @@
         "GitHub.vscode-github-actions",
         "GitHub.vscode-pull-request-github",
         "golang.go",
+        "svelte.svelte-vscode",
         "ms-azuretools.vscode-docker",
         "redhat.ansible",
         "redhat.vscode-yaml",
@@ -53,6 +64,7 @@
         "editorconfig.editorconfig"
       ],
       "settings": {
+        "typescript.tsdk": "apps/frontends/web/node_modules/typescript/lib",
         "go.toolsManagement.autoUpdate": true,
         "go.useLanguageServer": true,
         "yaml.validate": true,

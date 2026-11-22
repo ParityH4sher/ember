@@ -7,7 +7,8 @@ sidebar_label: "003: AI gateway"
 [Companion notes](../README.md) · [Sandboxing](../sandboxing/README.md)
 
 **Date:** 2026-11-18  
-**Decision:** Require system-wide activity monitoring and alerting. Keep gateway selection open; use a provider adapter only if it integrates with the required monitoring.  
+**Decision (updated 2026-11-21):** Require system-wide activity monitoring and alerting and a shared gateway for all model calls. [DEC-007](../planning/human-decisions.md#dec-007---model-routing-privacy-and-spending) selects LiteLLM Proxy for the first pilot: automatic task-based routing within each user's configured models and read-only MCP tool access through the same gateway. Production adoption remains open.
+
 **Candidate evidence:** Upstream project and feature documentation reviewed 2026-11-18; no software installed or benchmarked.
 
 ## Recommendation
@@ -23,7 +24,7 @@ attribution, policy enforcement, and integration with system-wide monitoring:
    features matter more than Kubernetes-native integration.
 
 Selection requires runtime qualification. Monitoring and alerting are mandatory
-whether Ember uses a provider adapter or a dedicated gateway.
+regardless of gateway implementation.
 
 ## Mandatory monitoring and alerting
 
@@ -77,13 +78,17 @@ verification.
   needing its conventional API-gateway plugin ecosystem. Avoid introducing a
   second general-purpose gateway just for a small LLM pilot.
 
-## Gate for introducing a gateway
+## Gateway implementation decision
 
-First establish a narrow Ember-owned provider interface and store provider
-credentials in the host-side secret store. The adapter must export request and
-policy events into the monitoring system. Add a dedicated gateway when routing,
-governance, or telemetry requirements cannot be met proportionately in that layer.
-Monitoring and alerting must be present in either design.
+First test the shared gateway interface with two users and mock providers.
+Submit the same task for both users without specifying a model; verify that
+each selection comes from that user's configuration and that an empty eligible
+set makes no upstream call. Use the same fixtures to evaluate existing gateway
+products. Record which task-routing rules each supports through configuration.
+
+With a hosted mock approved for one user, verify it is eligible across that
+user's ordinary projects. Mark one project local-only and make its local
+endpoint unavailable: even on retry, the hosted mock must receive no call.
 
 Before selecting one, decide:
 
@@ -119,8 +124,9 @@ a mock/local provider, then controlled real-provider calls:
    by default where sensitive source code could appear. Check log access and TTL.
 6. Measure overhead, restart behavior, credential rotation, Postgres/cache
    recovery, and (if required) HA. Record licensing for every feature.
-7. Add MCP only if centralized tool auth/allowlists are needed. Validate caller
-   identity propagation and ensure tool-service credentials never reach the model.
+7. Test the [LiteLLM MCP gateway](https://docs.litellm.ai/docs/mcp) with a
+   read-only Immich tool. Verify that each instance can read only its own test
+   photos, and that tool-service credentials never reach the model.
 8. Exercise model, process, file, integration, and network actions; verify
    correlated audit records, including traffic that bypasses the gateway.
 9. Trigger policy denials and usage thresholds; verify alerts. Interrupt a
@@ -132,8 +138,8 @@ limits and a hard external spend alert/cap where provider billing allows.
 
 ## Candidate by future project shape
 
-- **Initial single-user Ember prototype:** use a minimal provider adapter only
-  when it integrates with the required activity monitoring and alerting.
+- **Initial Ember routing prototype:** exercise the shared router with mock
+  providers and verify per-user selection and monitoring before enabling real calls.
 - **Kubernetes service with OIDC and MCP policy:** trial agentgateway first,
   while documenting the Kubernetes-mode budget limitation.
 - **Self-hosted gateway with built-in cache/UI/MCP:** trial Bifrost, after a

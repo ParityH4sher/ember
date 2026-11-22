@@ -9,7 +9,7 @@ project="ember-smoke-$(basename "$tmp" | tr '[:upper:].' '[:lower:]-')"
 stack=0
 cleanup() {
   if (( stack )); then
-    docker compose -f deploy/compose.yaml down --timeout 5
+    docker compose -f deploy/compose.yaml down --volumes --timeout 5
   fi
   rm -rf -- "$tmp"
 }
@@ -22,12 +22,13 @@ cd "$name"
 docker compose -f deploy/compose.yaml config --format json | python3 -c '
 import json, pathlib, sys
 services = json.load(sys.stdin)["services"]
-for name in ("api", "frontend"):
+for name, directory in (("api", "apps/api"), ("home", "apps/frontends/home"),
+                        ("notes", "apps/frontends/web"), ("frontend", "deploy/gateway")):
     build = services[name]["build"]
     context = pathlib.Path(build["context"])
-    assert context.resolve() == (pathlib.Path.cwd()/"apps"/name).resolve()
+    assert context.resolve() == (pathlib.Path.cwd()/directory).resolve()
     assert (context/build.get("dockerfile", "Dockerfile")).is_file()
-assert not services["api"].get("ports")
+assert all(not services[s].get("ports") for s in ("api", "home", "notes"))
 assert [p["host_ip"] for p in services["frontend"]["ports"]] == ["127.0.0.1"]
 '
 export COMPOSE_PROJECT_NAME="$project"
@@ -48,6 +49,14 @@ assert expected and json.load(sys.stdin) == {"status": "ok", "version": expected
   grep -Eiq '^X-Request-ID: [[:alnum:]]+' "$tmp/headers"
 }
 health
+base="http://127.0.0.1:$EMBER_HTTP_PORT"
+docker compose -f deploy/compose.yaml stop home
+curl --noproxy '*' --fail --silent --show-error "http://127.0.0.1:$EMBER_HTTP_PORT/apps/notes/manifest.webmanifest" |
+  python3 -c 'import json, sys; assert json.load(sys.stdin)["display"] == "standalone"'
+docker compose -f deploy/compose.yaml start home
+docker compose -f deploy/compose.yaml stop notes
+curl --noproxy '*' -fsS --retry 10 --retry-all-errors --retry-delay 1 "$base/" |
+  grep -F '<title>Ember</title>'
 # A service name survives replacement; a cached container IP may not.
 docker compose -f deploy/compose.yaml up -d --no-build --no-deps --force-recreate api
 health

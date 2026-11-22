@@ -1,0 +1,101 @@
+# Traefik: routes public hostnames from the Cloudflare Tunnel to services on the
+# shared `edge` network.
+# - No host networking and no published ports. Traefik sits on internal Docker
+#   networks (the shared ones are created by infra/ansible/roles/ingress_networks):
+#     tunnel:     cloudflared reaches it as http://traefik:8081;
+#     edge:       it reaches routed services, such as http://authentik:9000;
+#     docker-api: private to this stack; only the read-only socket proxy.
+#   Internal networks have no internet access, so neither does Traefik.
+# - Two route sources:
+#     file   ./dynamic, rendered from ingress_routes: the curated routes, with
+#            a high priority so that labels cannot take over their hostnames;
+#     docker containers on `edge` labelled traefik.enable=true. Nothing is
+#            routed by default.
+# - Traefik never gets the Docker socket. socket-proxy exposes only read-only
+#   container listing, inspection and events (no POST, no exec, no images).
+# - Cloudflare terminates public TLS. Every request on the tunnel entry point is
+#   marked HTTPS, so applications build correct https:// URLs.
+name: stack-traefik
+
+x-ember-stack:
+  generated-secrets: []
+
+services:
+  traefik:
+    image: docker.io/library/traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4
+    user: "65532:65532"
+    command:
+      - --global.checkNewVersion=false
+      - --global.sendAnonymousUsage=false
+      - --log.level=${LOG_LEVEL:-INFO}
+      - --entryPoints.tunnel.address=:8081
+      # Routers defined by labels attach here without naming an entry point.
+      - --entryPoints.tunnel.asDefault=true
+      # Applies to every router on this entry point, from file or labels.
+      - --entryPoints.tunnel.http.middlewares=public-https@file
+      # Only containers on the internal networks can connect, and Docker gives
+      # them private addresses: keep the visitor address that cloudflared forwards.
+      - --entryPoints.tunnel.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      - --entryPoints.ping.address=127.0.0.1:8082
+      - --ping.entryPoint=ping
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=edge
+    networks:
+      tunnel:
+        aliases: [traefik]
+      edge: {}
+      docker-api: {}
+    depends_on:
+      - socket-proxy
+    volumes:
+      - ./dynamic:/etc/traefik/dynamic:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--ping.entryPoint=ping", "--entryPoints.ping.address=127.0.0.1:8082"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # Read-only Docker API for Traefik's label discovery. Everything else,
+  # including all POST requests, is refused with 403.
+  socket-proxy:
+    image: docker.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      VERSION: "1"
+      PING: "1"
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2375/_ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # The entrypoint writes the generated HAProxy configuration to /tmp.
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+networks:
+  tunnel:
+    external: true
+  edge:
+    external: true
+  docker-api:
+    internal: true

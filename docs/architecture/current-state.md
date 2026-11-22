@@ -26,5 +26,5 @@ The examined `community.docker` 5.4.0 implementation (`plugins/module_utils/_com
 
 - The API code is evidence of behavior; OpenAPI is the reviewed public contract. A mismatch is a defect, not a reason to invent an endpoint.
 - Use the committed JSON schema for the *current* portable manifest. The YAML sketch in [agent project contract](../agent-project-contract.md) describes richer future work instructions; it is not a valid v1 example.
-- [ADR 003](../decisions/003-ai-gateway-shortlist.md) defers gateway adoption. The architecture page's suggested Bifrost experiment is not a selection.
+- [ADR 003](../decisions/003-ai-gateway-shortlist.md) selects LiteLLM for the first shared gateway pilot. No gateway is deployed.
 - Keep historical POC scope and wishlist pages. Use the [roadmap](../planning/roadmap.md) for implementation order; use the [operations page](../operations/README.md) for the operator path.

@@ -11,17 +11,26 @@ that planned services already ship in the installer.
 
 ## What the current installation needs
 
-The current Compose installation runs only two services:
+The current Compose installation runs four services:
 
-- **API** (`apps/api`): Go HTTP service. At present it exposes only
-  `GET /healthz`.
-- **Frontend** (`apps/frontend`): static Nginx page which proxies `/api/` to the
-  API.
+- **API** (`apps/api`): Go HTTP service with health, project, Markdown note,
+  and plugin-configuration endpoints. Projects and notes survive restarts in the
+  Compose `projects` volume; plugin configuration is process-local.
+  Sign-in is optional [OpenID Connect](authentication.md) and is off by
+  default. Without it the API has no authentication; do not expose it to an
+  untrusted network or configure real service credentials.
+- **Home** (`apps/frontends/home`): static status page.
+- **Notes** (`apps/frontends/web`): installable linked-note editor.
+- **Gateway** (`deploy/gateway`, Compose service `frontend`): routes `/` to
+  Home, `/apps/notes/` to Notes and `/api/` to the API.
 
 The required host dependency is either Docker Engine with Compose v2 or Podman
 with a working Compose provider. The host needs network access to fetch base
 images during the initial build. No database, model provider, agent runtime,
-CAD tool, plugin, or external account is required by this scaffold.
+CAD tool, or external account is required by this scaffold. The API includes
+Immich configuration metadata but does not connect to Immich. Its example
+Weather plugin calls the public Open-Meteo API when activated, so outbound
+network access is needed only to use that operation.
 
 Use `./install.sh` from the extracted bundle root, or run from the repository root:
 
@@ -31,8 +40,8 @@ docker compose -f deploy/compose.yaml up --build -d
 
 The frontend binds to `127.0.0.1:3000` by default. See the
 [deployment guide](deployment.md) for supported hosts, port configuration, and
-security limitations. The API has no authentication; do not expose it directly
-to an untrusted network.
+security limitations. Unless [sign-in](authentication.md) is configured, the
+API has no authentication; do not expose it directly to an untrusted network.
 
 ## Services planned for agent-enabled Ember
 

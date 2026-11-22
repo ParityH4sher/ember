@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Ember web: start",
+      "dependsOn": ["Ember API: start", "Ember web: Vite"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Ember API: start",
+      "type": "process",
+      "command": "go",
+      "args": ["run", "."],
+      "options": { "cwd": "${workspaceFolder}/apps/api" },
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "group": "ember-web" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ember web: Vite",
+      "type": "process",
+      "command": "npm",
+      "args": ["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"],
+      "options": { "cwd": "${workspaceFolder}/apps/frontends/web" },
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "group": "ember-web" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ember web: type-check",
+      "type": "process",
+      "command": "npm",
+      "args": ["run", "check"],
+      "options": { "cwd": "${workspaceFolder}/apps/frontends/web" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ember docs: start",
+      "type": "shell",
+      "command": "npm --prefix website start",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

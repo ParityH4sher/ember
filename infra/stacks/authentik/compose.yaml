@@ -1,0 +1,111 @@
+# Authentik identity provider, a shared default service (DEC-002).
+# Based on the upstream https://goauthentik.io/docker-compose.yml for 2026.8.5,
+# with these changes:
+#   - images are pinned by multi-architecture index digest (amd64 and arm64);
+#   - secrets are read from files in ./secrets instead of .env;
+#   - the Docker socket is not mounted, so Authentik cannot manage outposts or
+#     the host (deploy outposts by hand if you need them);
+#   - HTTP is published on loopback only; Traefik terminates TLS;
+#   - named volumes replace bind mounts, and the optional custom templates and
+#     certificate directories are omitted.
+name: stack-authentik
+
+x-ember-stack:
+  generated-secrets:
+    - authentik_secret_key
+    - authentik_postgres_password
+    # Shared with Ember's API, which reads it from this file (roles/ember).
+    - ember_oidc_client_secret
+
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:2026.8.5@sha256:602227a86455d6772e3d16b7d852713c4f864f40df5df894abd1285bb53979a5
+  depends_on:
+    postgresql:
+      condition: service_healthy
+  # Optional non-secret AUTHENTIK_* settings, for example email delivery.
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    AUTHENTIK_POSTGRESQL__HOST: postgresql
+    AUTHENTIK_POSTGRESQL__NAME: authentik
+    AUTHENTIK_POSTGRESQL__USER: authentik
+    AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/authentik_postgres_password
+    AUTHENTIK_SECRET_KEY: file:///run/secrets/authentik_secret_key
+    AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+    AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+  secrets:
+    - authentik_postgres_password
+    - authentik_secret_key
+  shm_size: 512mb
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  volumes:
+    - data:/data
+
+services:
+  postgresql:
+    image: docker.io/library/postgres:16.16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD_FILE: /run/secrets/authentik_postgres_password
+    secrets:
+      - authentik_postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    volumes:
+      - database:/var/lib/postgresql/data
+
+  # Only the server joins the shared `edge` network, where Traefik reaches it as
+  # http://authentik:9000. PostgreSQL and the worker stay on this stack's own
+  # network. The loopback port is for administration over an SSH tunnel.
+  server:
+    <<: *authentik
+    command: server
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-9000}:9000"
+    networks:
+      default: {}
+      edge:
+        aliases: [authentik]
+
+  # The worker applies blueprints. ./blueprints holds the rendered Ember client
+  # (templates/blueprints/ember.yaml.j2); the blueprint reads the client secret
+  # with !File.
+  worker:
+    <<: *authentik
+    command: worker
+    secrets:
+      - authentik_postgres_password
+      - authentik_secret_key
+      - ember_oidc_client_secret
+    volumes:
+      - data:/data
+      - ./blueprints:/blueprints/custom:ro
+
+volumes:
+  database:
+  data:
+
+networks:
+  default: {}
+  # Created by infra/ansible/roles/ingress_networks (by hand:
+  # docker network create --internal edge).
+  edge:
+    external: true
+
+secrets:
+  authentik_secret_key:
+    file: ./secrets/authentik_secret_key
+  authentik_postgres_password:
+    file: ./secrets/authentik_postgres_password
+  ember_oidc_client_secret:
+    file: ./secrets/ember_oidc_client_secret

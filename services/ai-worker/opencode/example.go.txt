@@ -1,0 +1,8 @@
+package review
+
+import "strconv"
+
+func Double(input string) int {
+	n, _ := strconv.Atoi(input)
+	return 2 * n
+}

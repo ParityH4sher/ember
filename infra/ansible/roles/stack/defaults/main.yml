@@ -1,0 +1,19 @@
+---
+# Where stacks live on the host: one directory per stack.
+stacks_root: /opt/stacks
+# Stack definitions in this checkout (infra/stacks).
+stack_sources_dir: "{{ playbook_dir }}/../../stacks"
+stack_owner: root
+stack_group: root
+# The first Authentik start runs database migrations, which is slow on a Pi.
+stack_wait_timeout: 600
+
+# Secrets supplied by the operator, keyed by stack and then secret name.
+# playbooks/stacks.yml fills stack_env_secrets from the repository's gitignored
+# .env. A Vault vars file can also pass stack_secrets, which takes precedence:
+#   stack_secrets:
+#     cloudflared:
+#       cloudflare_tunnel_token: "eyJ..."
+# Secrets listed in a stack's x-ember-stack.generated-secrets are generated on
+# the host when absent and are never overwritten.
+stack_secrets: {}

@@ -66,6 +66,29 @@ Check mode can contact the host and is not proof that provisioning is
 idempotent. An actual provision run applies host changes and requires the
 operator's authorization.
 
+The playbook installs Tailscale from its official Debian/Ubuntu package
+repository and enables the daemon. If the host is already enrolled, it also
+configures Serve automatically. For unattended first-time enrollment, supply
+`tailscale_auth_key` from an Ansible Vault file; see the detailed commands in
+`infra/ansible/README.md`. Otherwise, log in once on the host:
+
+```sh
+sudo tailscale up
+```
+
+Then rerun Ansible; it configures Serve automatically. Open the HTTPS `*.ts.net`
+address shown by `sudo tailscale serve status`. This uses Tailscale Serve,
+not Funnel: it is available to authorized tailnet devices rather than the
+public internet. UFW permits TCP 443 only on `tailscale0`; the Compose service
+remains bound to loopback. To remove the Serve route, run
+`sudo tailscale serve off`.
+Serve does not add application authentication. Ensure tailnet ACLs restrict
+access to trusted devices and users; the Ember API itself remains unauthenticated.
+
+To redeploy one frontend, run `docker compose -f deploy/compose.yaml up -d
+--build home` or use `notes` instead. Both use the existing Serve route; the
+gateway forwards each path to its own container.
+
 ## GitHub Actions bundle
 
 Download the `ember-compose-bundle` artifact from a successful **Build and test
@@ -83,8 +106,10 @@ scheduling requirement exists.
 
 ## Current operational limitations
 
-- The API has no authentication; keep it behind loopback and do not expose it
-  directly to an untrusted network.
+- Sign-in is off by default, so the API has no authentication unless you
+  [configure OpenID Connect](../authentication.md). Keep it behind loopback and
+  do not expose it directly to an untrusted network. Even with sign-in, every
+  signed-in user can use every project and plugin.
 - The Compose frontend is loopback-bound by default. Put a managed TLS reverse
   proxy in front before remote access.
 - No database, backups, metrics, alerting, or task recovery is implemented yet.

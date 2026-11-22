@@ -47,8 +47,13 @@ replaced. Image-build reproducibility is separate from source archive equality.
 The frontend is published on `127.0.0.1:3000` by default, and proxies API
 requests internally. Set `EMBER_HTTP_PORT` before running `./install.sh` to
 change the host port. The API has no user authentication; keep the frontend
-loopback-bound unless you have configured a trusted reverse proxy and suitable
-authentication and network controls.
+loopback-bound unless you use a private access layer such as Tailscale Serve.
+The Ansible setup installs Tailscale but requires manual device enrollment;
+see the [operations guide](operations/README.md#ansible-host-provisioning).
+
+The `frontend` gateway routes `/` to `home` and `/apps/notes/` to `notes`.
+The two frontend services have separate build contexts and neither needs the
+other to be running.
 
 The installer accepts decimal ports `1` through `65535` without leading zeros.
 `EMBER_COMPOSE_RUNTIME=podman` or `docker` selects a specific provider; the
@@ -78,8 +83,16 @@ go test ./...
 go run .
 ```
 
-The API currently exposes only `GET /healthz`. No project, task, database, or
-agent functionality is claimed by this scaffold.
+The API stores active project records and Markdown notes under `EMBER_PROJECT_ROOT`
+(`./projects` for a local binary; `/var/lib/ember/projects` in the Compose
+`projects` volume). Open `/apps/notes/` on the frontend to edit them. Removing
+the volume removes its data. Removing a project record retains its notes on disk.
+Plugin configuration is lost on API restart. Sign-in is optional
+[OpenID Connect](authentication.md), off by default. There is no database, task execution, or agent
+behavior. Weather sends coordinates to Open-Meteo; its free API is
+non-commercial and requires attribution. Do not expose this prototype to an
+untrusted network or configure real upstream credentials. Immich remains
+configuration-only.
 
 `EMBER_LISTEN_ADDR` defaults to `127.0.0.1:8080` when running directly. Compose
 sets it to `0.0.0.0:8080` inside the unpublished API container. The server

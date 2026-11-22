@@ -19,6 +19,10 @@ jobs:
           cache: false
       - run: go vet ./... && go test -race ./...
         working-directory: apps/api
+      - run: go vet ./... && go test -race ./...
+        working-directory: services/sandbox-router
+      - run: python3 -B -m unittest discover -s pilot
+        working-directory: services/sandbox-router
 
   bundle:
     needs: test
@@ -35,3 +39,89 @@ jobs:
           path: dist/*.tar.gz*
           if-no-files-found: error
           retention-days: 30
+
+  # Publishes every Compose service as a multi-arch image (amd64 and arm64, for
+  # Pi targets) to the GitHub Container Registry, as
+  # ghcr.io/<owner>/ember-<service>:sha-<commit>. Hosts deploy them with
+  # deploy/compose.registry.yaml. Only main is published, and only after the
+  # tests and the bundle smoke test pass.
+  images:
+    needs: [test, bundle]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { service: api, context: apps/api }
+          - { service: home, context: apps/frontends/home }
+          - { service: notes, context: apps/frontends/web }
+          - { service: gateway, context: deploy/gateway }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp the API version with the commit
+        if: matrix.service == 'api'
+        run: printf '%s\n' "$GITHUB_SHA" > apps/api/version.txt
+      - name: Log in to the GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push ${{ matrix.service }}
+        env:
+          SERVICE: ${{ matrix.service }}
+          CONTEXT: ${{ matrix.context }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ember-$SERVICE"
+          source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          # The default builder cannot push several platforms at once. The
+          # Dockerfiles compile on the build platform, so no emulation is needed.
+          docker buildx create --use --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+          # The source label links each package to this repository on GitHub.
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --label "org.opencontainers.image.source=$source" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --annotation "index:org.opencontainers.image.source=$source" \
+            --annotation "index:org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image:sha-$GITHUB_SHA" --push "$CONTEXT"
+
+  # Moves `latest` only after all four images of this commit exist, so the four
+  # `latest` tags always name the same commit. It skips commits that are no
+  # longer the head of main, so a slow or re-run older workflow cannot replace
+  # a newer `latest`. To roll back, deploy a sha- tag instead.
+  images-latest:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: ghcr-latest
+      cancel-in-progress: false
+    steps:
+      - name: Check that this commit is still the head of main
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main moved on to $head; leaving latest unchanged."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to the GitHub Container Registry
+        if: steps.head.outputs.current == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Point latest at this commit
+        if: steps.head.outputs.current == 'true'
+        run: |
+          for service in api home notes gateway; do
+            image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ember-$service"
+            docker buildx imagetools create --tag "$image:latest" "$image:sha-$GITHUB_SHA"
+          done

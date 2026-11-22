@@ -1,0 +1,160 @@
+---
+# Shared service stacks (infra/stacks). This playbook is separate from site.yml
+# on purpose: deploying, reinstalling or removing Ember never touches these
+# services, and this playbook never touches Ember (DEC-006).
+#
+#   ansible-playbook -i inventories/homelab/hosts.yml playbooks/stacks.yml
+#
+# Operator secrets come from the repository's gitignored .env (.env.example).
+
+- name: Check supported Ansible controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require ansible-core supported by the pinned collections
+      ansible.builtin.assert:
+        that:
+          - ansible_version.full is version('2.19', '>=')
+        fail_msg: >-
+          This playbook requires ansible-core 2.19 or newer for the pinned
+          community.general 14.x and community.docker 5.x collections.
+
+- name: Deploy shared service stacks
+  hosts: ember_hosts
+  become: true
+  vars:
+    shared_stacks: "{{ (shared_default_services | default([])) + (shared_optional_services | default([])) }}"
+    shared_stack_names: "{{ shared_stacks | map(attribute='name') | list }}"
+    # Public ingress: Cloudflare Tunnel -> cloudflared =tunnel network=> Traefik
+    # =edge network=> routed services. Deployed only when ingress_domain is set,
+    # and only after the checks below pass, because these hostnames are
+    # reachable from the internet.
+    ingress_enabled: "{{ (ingress_domain | default('')) | length > 0 }}"
+    ingress_stacks:
+      - name: traefik
+      - name: cloudflared
+    authentik_port: >-
+      {{ ((shared_stacks | selectattr('name', 'equalto', 'authentik') | first | default({})).env
+          | default({})).HTTP_PORT | default('9000') }}
+    # Operator secrets can come from the repository's gitignored .env (see
+    # .env.example), read on the controller. Values from a Vault file passed as
+    # stack_secrets take precedence.
+    repo_env_file: "{{ playbook_dir }}/../../../.env"
+    stack_secrets_from_env:
+      - {env: CLOUDFLARE_TUNNEL_TOKEN, stack: cloudflared, secret: cloudflare_tunnel_token}
+  pre_tasks:
+    - name: Read operator secrets from the repository's .env
+      ansible.builtin.set_fact:
+        stack_env_secrets: >-
+          {{ stack_env_secrets | default({})
+             | combine({item.stack: {item.secret: repo_env[item.env]}}, recursive=true) }}
+      loop: "{{ stack_secrets_from_env }}"
+      loop_control:
+        label: "{{ item.env }}"
+      vars:
+        # KEY=value lines; comments and blank lines are ignored. The pattern
+        # drops one optional ' or " around the value (no backreferences, which
+        # Jinja string escaping would mangle).
+        repo_env: >-
+          {{ dict(lookup('ansible.builtin.file', repo_env_file, errors='ignore') | default('', true)
+                  | regex_findall('^[ \t]*([A-Z][A-Z0-9_]*)=[ \t]*["\x27]?(.*?)["\x27]?[ \t]*$', multiline=true)) }}
+      when: (repo_env[item.env] | default('')) | length > 0
+      no_log: true
+
+    - name: Require explicit, well-formed ingress routes
+      ansible.builtin.assert:
+        that:
+          - item.name is match('^[a-z][a-z0-9-]{0,30}$')
+          - item.host is match('^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
+          - item.url is match('^http://[a-z][a-z0-9-]{0,62}:[0-9]{1,5}(/[^\s]*)?$')
+        fail_msg: >-
+          ingress_routes entries need a lowercase name, a DNS host name and an
+          http://<alias>:<port> URL naming a container alias on the internal
+          `edge` network. Traefik cannot reach anything else.
+        quiet: true
+      loop: "{{ ingress_routes | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('?') }}"
+      when: ingress_enabled | bool
+
+    - name: Refuse to publish Ember without sign-in
+      ansible.builtin.assert:
+        that:
+          - ember_oidc_enabled | default(false) | bool
+        fail_msg: >-
+          ingress_routes publishes Ember on the internet, but Ember sign-in
+          (ember_oidc_enabled) is off. Add Authentik to shared_default_services
+          or remove the ember route.
+        quiet: true
+      when:
+        - ingress_enabled | bool
+        - "'ember' in (ingress_routes | default([]) | map(attribute='name'))"
+  roles:
+    - role: container-runtime
+      tags: [container-runtime]
+    # The internal `tunnel` and `edge` networks. Always created, because stacks
+    # such as Authentik attach their front container to `edge`.
+    - role: ingress_networks
+  tasks:
+    - name: Deploy each shared service stack
+      ansible.builtin.include_role:
+        name: stack
+      loop: "{{ shared_stacks }}"
+      loop_control:
+        loop_var: stack
+        label: "{{ stack.name }}"
+
+    # Until akadmin has a usable password, Authentik's initial-setup flow lets
+    # anyone who reaches it claim the administrator account (policy
+    # default-oobe-password-usable). Never publish it in that state. Ask
+    # Authentik directly: an HTTP probe cannot tell, because the flow denies
+    # API requests that were not started from the setup page, and it does not
+    # exist yet in the first seconds after a fresh install.
+    - name: Check whether Authentik's administrator account is claimed
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-directory
+          - "{{ stacks_root }}/authentik"
+          - exec
+          - -T
+          - worker
+          - ak
+          - shell
+          - -c
+          - >-
+            from authentik.core.models import User;
+            u = User.objects.filter(username="akadmin").first();
+            print("claimed" if u is not None and u.has_usable_password() else "unclaimed")
+      register: authentik_admin_state
+      changed_when: false
+      when:
+        - ingress_enabled | bool
+        - "'authentik' in shared_stack_names"
+
+    - name: Require a claimed Authentik administrator before publishing
+      ansible.builtin.assert:
+        that:
+          - authentik_admin_state.stdout is search('^claimed$', multiline=true)
+        fail_msg: >-
+          Authentik's administrator account (akadmin) has no password yet, so
+          nothing was published. Open an SSH tunnel (ssh -L
+          9000:127.0.0.1:{{ authentik_port }} {{ inventory_hostname }}), open
+          http://localhost:9000/ to finish the initial setup, and rerun this
+          playbook. Keep the akadmin account (deactivate it if you like): this
+          check requires it to exist with a password.
+        quiet: true
+      when:
+        - ingress_enabled | bool
+        - "'authentik' in shared_stack_names"
+
+    - name: Deploy the public ingress
+      ansible.builtin.include_role:
+        name: stack
+      loop: "{{ ingress_stacks }}"
+      loop_control:
+        loop_var: stack
+        label: "{{ stack.name }}"
+      when: ingress_enabled | bool

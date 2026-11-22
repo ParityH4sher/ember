@@ -1,0 +1,4 @@
+---
+# Supply from an encrypted Ansible Vault vars file to enroll a new host
+# automatically. Never put an auth key in inventory or source control.
+tailscale_auth_key: ""

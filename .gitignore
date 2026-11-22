@@ -3,3 +3,9 @@ website/.docusaurus/
 website/build/
 website/.cache/
 website/*.log
+/apps/api/projects/
+/apps/frontends/web/node_modules/
+/apps/frontends/web/.svelte-kit/
+/apps/frontends/web/build/
+# Operator secrets (see .env.example). Never commit them, at any depth.
+.env

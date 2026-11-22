@@ -17,6 +17,41 @@ put both roles in one broadly privileged agent process.
 | [Filesystem scope](filesystem-scope.md) | How project workspaces differ from Ember memory and personal data. |
 | [Architecture proposal](architecture-proposal.md) | Cross-cutting security model, review notes, and staged implementation plan. |
 
+## Try the agent sandbox router
+
+The [sandbox router prototype](https://github.com/ParityH4sher/ember/tree/main/services/sandbox-router)
+starts a fresh agent process from an operator-approved image. A private
+`POST /v1/runs` request names the agent; host policy selects rootless Podman
+for reviewed tools or a Kata VM for agents that can execute code. A missing VM
+runtime fails the run rather than selecting a weaker boundary. Both profiles
+are offline and disposable. See `services/sandbox-router/README.md` in the
+checkout for setup, an offline test agent, and a request for each profile.
+This operator-side experiment is separate from the Compose stack; model access
+and end-user task authorization are still planned.
+
+## Run the offline thumbnail proof
+
+From the Ember source root, on Linux with rootless Podman, cgroup v2, Bash
+and Python 3, run:
+
+```sh
+bash services/thumbnail/qualify.sh
+```
+
+The build needs registry access on first use for its pinned Go builder.
+The job itself has no external network interface. It accepts one staged PNG
+(up to 4 MiB and 4 megapixels), center-crops it and writes a 128×128 PNG to
+stdout. The host bounds the export; no host output directory is writable from
+the worker. Each run uses disposable inputs and removes the fixture and result
+on exit. Podman retains its build cache.
+
+The script runs a separate probe with the same runtime restrictions to check
+read-only input and root, non-root identity, dropped capabilities, loopback-only
+networking and absence of a host credential canary. It runs the actual worker
+separately and checks the export. Run it on the target Pi before qualifying
+that host. This is an operator-run fixture, not an API job endpoint, queue
+consumer, or connection to Immich.
+
 ## Choose the execution boundary
 
 | Approach | Boundary | Useful for |

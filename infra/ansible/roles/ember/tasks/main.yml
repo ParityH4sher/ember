@@ -15,40 +15,218 @@
     group: root
     mode: "0755"
 
-- name: Copy API source
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../../apps/api/"
-    dest: "{{ ember_install_dir }}/apps/api/"
-    owner: root
-    group: root
-    mode: preserve
+- name: Require a known image source
+  ansible.builtin.assert:
+    that:
+      - ember_image_source in ['build', 'registry']
+    fail_msg: ember_image_source must be `build` or `registry`, not {{ ember_image_source | to_json }}.
+    quiet: true
 
-- name: Copy frontend source
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../../apps/frontend/"
-    dest: "{{ ember_install_dir }}/apps/frontend/"
-    owner: root
-    group: root
-    mode: preserve
+- name: Require a registry and tag for prebuilt images
+  ansible.builtin.assert:
+    that:
+      - ember_image_registry is match('^[a-z0-9.-]+(:[0-9]{1,5})?(/[a-z0-9._-]+)+$')
+      - ember_image_tag is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
+      - ember_registry_token | length == 0 or ember_registry_username | length > 0
+    fail_msg: >-
+      ember_image_source is `registry`, so set ember_image_registry to the image
+      namespace (for example ghcr.io/<owner>, lowercase) and ember_image_tag to
+      `latest` or `sha-<full commit>`. A registry token also needs
+      ember_registry_username.
+    quiet: true
+  when: ember_from_registry | bool
 
-- name: Install Compose manifest
+- name: Stage build inputs on the host
+  when: not (ember_from_registry | bool)
+  block:
+    - name: Copy API source
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../apps/api/"
+        dest: "{{ ember_install_dir }}/apps/api/"
+        owner: root
+        group: root
+        mode: preserve
+
+    - name: Copy independent frontend build inputs
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../apps/frontends/{{ item }}"
+        dest: "{{ ember_install_dir }}/apps/frontends/{{ item }}"
+        owner: root
+        group: root
+        mode: preserve
+      loop:
+        - home/
+        - web/src/
+        - web/static/
+        - web/package.json
+        - web/package-lock.json
+        - web/tsconfig.json
+        - web/vite.config.ts
+        - web/.dockerignore
+        - web/Dockerfile
+
+    - name: List staged web source files
+      ansible.builtin.find:
+        paths: "{{ ember_install_dir }}/apps/frontends/web/src"
+        recurse: true
+        hidden: true
+        file_type: file
+      register: ember_web_sources
+
+    - name: Remove staged web sources absent from the controller checkout
+      vars:
+        relative_path: "{{ item.path | relpath(ember_install_dir ~ '/apps/frontends/web/src') }}"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ ember_web_sources.files }}"
+      loop_control:
+        label: "{{ relative_path }}"
+      when: (playbook_dir ~ '/../../../apps/frontends/web/src/' ~ relative_path) is not file
+
+    - name: Copy gateway build inputs
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../deploy/gateway/"
+        dest: "{{ ember_install_dir }}/deploy/gateway/"
+        owner: root
+        group: root
+        mode: preserve
+
+- name: Install Compose manifests
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../../deploy/compose.yaml"
-    dest: "{{ ember_install_dir }}/deploy/compose.yaml"
+    src: "{{ playbook_dir }}/../../../deploy/{{ item }}"
+    dest: "{{ ember_install_dir }}/deploy/{{ item }}"
     owner: root
     group: root
     mode: "0644"
+  loop:
+    - compose.yaml
+    # The overlays are always installed so that the build fingerprint does not
+    # depend on settings. They are used only while ember_oidc_enabled,
+    # ember_edge_enabled is true, or ember_image_source is `registry`.
+    - compose.oidc.yaml
+    - compose.edge.yaml
+    - compose.registry.yaml
+
+- name: Prepare to pull prebuilt images
+  when: ember_from_registry | bool
+  block:
+    - name: Read the Docker Compose version
+      ansible.builtin.command:
+        argv: [docker, compose, version, --short]
+      register: ember_compose_version
+      changed_when: false
+
+    # compose.registry.yaml removes the build sections with `!reset`.
+    - name: Require Docker Compose 2.24.4 or newer for the registry overlay
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ember_compose_version.stdout | trim
+             | regex_search('^v?[0-9]+[.][0-9]+[.][0-9]+') | default('0.0.0', true)
+             | regex_replace('^v', '')) is version('2.24.4', '>=')
+        fail_msg: >-
+          Docker Compose {{ ember_compose_version.stdout | trim }} cannot read
+          deploy/compose.registry.yaml. Install Compose 2.24.4 or newer, or set
+          ember_image_source to `build`.
+        quiet: true
+
+    # Credentials are stored in root's Docker configuration on the host, which
+    # Compose uses for every later pull.
+    - name: Log in to the image registry for private packages
+      ansible.builtin.command:
+        argv:
+          - docker
+          - login
+          - "{{ ember_image_registry.split('/') | first }}"
+          - --username
+          - "{{ ember_registry_username }}"
+          - --password-stdin
+        stdin: "{{ ember_registry_token }}"
+      changed_when: false
+      when: ember_registry_token | length > 0
+      no_log: true
+
+- name: Ensure the shared ingress networks exist
+  ansible.builtin.include_role:
+    name: ingress_networks
+  when: ember_edge_enabled | bool
+
+- name: Configure OpenID Connect sign-in
+  when: ember_oidc_enabled | bool
+  block:
+    - name: Read the Ember client secret generated by the local Authentik stack
+      ansible.builtin.slurp:
+        src: "{{ ember_oidc_client_secret_source }}"
+      register: ember_oidc_secret_file
+      when: ember_oidc_client_secret | length == 0
+      failed_when: false
+      no_log: true
+
+    - name: Require an Ember client secret
+      ansible.builtin.assert:
+        that:
+          - ember_oidc_client_secret | length > 0 or 'content' in ember_oidc_secret_file
+        fail_msg: >-
+          Ember sign-in is enabled but no client secret is available. Run
+          playbooks/stacks.yml first (Authentik generates
+          {{ ember_oidc_client_secret_source }}), or set ember_oidc_client_secret
+          in your Vault file when Authentik runs on another host.
+        quiet: true
+
+    - name: Create the sign-in configuration directory
+      ansible.builtin.file:
+        path: "{{ ember_install_dir }}/config"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write the sign-in configuration
+      ansible.builtin.copy:
+        content: "{{ ember_oidc_config | to_nice_json }}\n"
+        dest: "{{ ember_install_dir }}/config/auth.json"
+        owner: root
+        group: root
+        mode: "0444"
+      vars:
+        ember_oidc_config: >-
+          {{ {'issuer': ember_oidc_issuer,
+              'clientId': ember_oidc_client_id,
+              'redirectUrl': ember_oidc_redirect_url,
+              'sessionTtl': ember_oidc_session_ttl}
+             | combine({'postLogoutRedirectUrl': ember_oidc_post_logout_redirect_url}
+                       if ember_oidc_post_logout_redirect_url else {})
+             | combine({'allowedGroups': ember_oidc_allowed_groups}
+                       if ember_oidc_allowed_groups else {}) }}
+      register: ember_oidc_config_file
+
+    # The API runs as UID 65532 in its container (distroless nonroot).
+    - name: Install the Ember client secret
+      ansible.builtin.copy:
+        content: >-
+          {{ ember_oidc_client_secret if ember_oidc_client_secret
+             else (ember_oidc_secret_file.content | b64decode | trim) }}
+        dest: "{{ ember_install_dir }}/config/oidc-client-secret"
+        owner: "65532"
+        group: "65532"
+        mode: "0400"
+      register: ember_oidc_secret
+      no_log: true
 
 - name: Fingerprint installed build inputs
   ansible.builtin.find:
     paths:
-      - "{{ ember_install_dir }}/apps"
+      - "{{ ember_install_dir }}/apps/api"
+      - "{{ ember_install_dir }}/apps/frontends/home"
+      - "{{ ember_install_dir }}/apps/frontends/web"
       - "{{ ember_install_dir }}/deploy"
     recurse: true
     hidden: true
     file_type: file
     get_checksum: true
   register: ember_inputs
+  when: not (ember_from_registry | bool)
 
 - name: Compare inputs with the last successfully deployed set
   ansible.builtin.template:
@@ -59,19 +237,39 @@
     mode: "0600"
   check_mode: true
   register: ember_build_needed
+  when: not (ember_from_registry | bool)
 
 - name: Reconcile Ember services
   community.docker.docker_compose_v2:
     project_src: "{{ ember_install_dir }}/deploy"
     project_name: "{{ ember_project_name }}"
-    files:
-      - compose.yaml
+    files: "{{ ember_compose_files }}"
     state: present
-    build: "{{ 'always' if ember_build_needed.changed else 'policy' }}"
+    # Prebuilt images are pulled on every run, so a moving tag such as `latest`
+    # replaces exactly the containers whose image changed.
+    build: >-
+      {{ 'never' if ember_from_registry | bool
+         else ('always' if ember_build_needed.changed else 'policy') }}
+    pull: "{{ 'always' if ember_from_registry | bool else 'policy' }}"
     wait: true
     wait_timeout: 90
-  environment:
-    EMBER_HTTP_PORT: "{{ ember_http_port | string }}"
+  environment: "{{ ember_compose_environment }}"
+  register: ember_reconcile
+
+# The API reads its sign-in files only at startup, and Compose does not notice
+# changed contents of mounted files.
+- name: Restart the API after a sign-in configuration change
+  community.docker.docker_compose_v2:
+    project_src: "{{ ember_install_dir }}/deploy"
+    project_name: "{{ ember_project_name }}"
+    files: "{{ ember_compose_files }}"
+    services: [api]
+    state: restarted
+  environment: "{{ ember_compose_environment }}"
+  when:
+    - ember_oidc_enabled | bool
+    - ember_oidc_config_file is changed or ember_oidc_secret is changed
+    - ember_reconcile is not changed
 
 - name: Record successfully deployed build inputs
   ansible.builtin.template:
@@ -80,4 +278,6 @@
     owner: root
     group: root
     mode: "0600"
-  when: ember_build_needed.changed
+  when:
+    - not (ember_from_registry | bool)
+    - ember_build_needed.changed

@@ -71,11 +71,13 @@ not become mandatory dependencies of the core installation.
 
 ## Current implementation status
 
-The current repository does not yet implement a module loader, feature registry,
-frontend framework, plugin runtime, authentication, task system, or persistence.
-It has a Go API process exposing `GET /healthz` and a static Nginx frontend
-which proxies `/api/`. The API and frontend are separate Compose services, but
-that deployment split alone is not a feature/plugin architecture. See
+The current repository has a compile-time plugin registry and adapter interface,
+but no dynamic module loader or installable plugin packages. The notes client
+uses SvelteKit and Vite; sign-in is optional OpenID Connect and there is no task system. The Go API exposes health,
+filesystem-backed projects and notes, in-memory plugin configuration, and a versioned
+Weather adapter; the Nginx frontend serves a linked-note editor and proxies `/api/`.
+The API and frontend are separate Compose services, but that deployment split
+alone is not a feature/plugin architecture. See
 [architecture](README.md) and [core installation](../core-installation.md).
 
 The supplied personal-Ember feature list is a **wishlist for product direction**,

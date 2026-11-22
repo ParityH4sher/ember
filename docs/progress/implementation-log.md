@@ -74,3 +74,62 @@ Verified the adjusted `ansible.builtin.find` task on Ansible 2.14.18 in a networ
 ### Follow-up to user-reported Compose and collection warnings
 
 Added Ubuntu's `docker-buildx` alongside the distro Docker/Compose packages. Compose had succeeded by falling back to the classic builder, but BuildKit features were unavailable. Added a localhost-only playbook preflight requiring ansible-core 2.19+, matching the pinned `community.general` 14.x and `community.docker` 5.x support ranges. An older controller now fails before connecting to or changing `pi`; the qualified controller remains 2.22.0. Target package installation and the preflight should be verified by the next isolated Ubuntu provisioning run.
+
+## Prebuilt registry images for the Ansible deployment (2026-11-22)
+
+Implemented [ADR 011](../decisions/011-prebuilt-registry-images.md):
+
+- the `images` and `images-latest` jobs in `.github/workflows/build.yml`;
+- `deploy/compose.registry.yaml`;
+- `ember_image_source: build | registry` in the `ember` role;
+- the homelab inventory switched to `registry` with `latest`;
+- `FROM --platform=$BUILDPLATFORM` build stages in the API and notes
+  Dockerfiles.
+
+Verified on Fedora (Linux 7.2, x86_64), Docker Engine 29.10.0 with the
+containerd image store, buildx 0.39.1, Compose 5.8.0:
+
+- The workflow's build and retag commands, run by hand against a throwaway
+  `registry:2` on loopback, built all four images for amd64 and arm64.
+  - Only the build platform ran `npm ci` and the Go build.
+  - The arm64 API binary is `ELF ... ARM aarch64`.
+  - Each index carries the source annotation, and
+    `docker buildx imagetools create` moved `latest`.
+- `docker compose -f compose.yaml -f compose.registry.yaml config` from a
+  directory holding only the manifests showed no `build` section. It fails
+  with the overlay's message when `EMBER_IMAGE_REGISTRY` is unset.
+- `up -d --pull always --no-build --wait` from that directory brought all four
+  services to healthy.
+  - `/api/healthz` reported the stamped version, and `/` and `/apps/notes/`
+    returned 200.
+  - After a new API build was retagged `latest`, a second `up` recreated only
+    the API.
+- The real `ember` role ran in a throwaway root container: ansible-core
+  2.22.0, community.docker 5.4.0, Compose 5.7.1, the host's Docker socket,
+  `-i localhost,`.
+  - `site.yml --syntax-check` with the homelab inventory passed.
+  - An invalid `ember_image_source` and an empty registry each failed at
+    their assertion.
+  - Registry mode deployed from manifests only. A rerun reported `ok`, a newer
+    `latest` was rolled out, and `ember_image_tag: sha-test` rolled back.
+  - Build mode, switching over from registry mode, rebuilt and served
+    `development`. Its rerun reported `changed=0`.
+  - The Compose version guard accepted `2.24.6+ds1-0ubuntu1~24.04.1`,
+    `v2.27.0` and `5.7.1`, and rejected `2.20.2+ds1…` and unparsable output.
+- `actionlint` 1.7.7, with shellcheck, reported nothing for `build.yml`.
+- Every test project, volume, registry and image was removed afterwards.
+
+Not run:
+
+- the workflow on GitHub (the GHCR login, the `docker-container` builder with
+  the pinned BuildKit v0.35.0, package linking and visibility);
+- `deploy/test-bundle.sh` with the changed Dockerfiles;
+- the private-package `docker login` path;
+- any run against the Pi, so neither its Compose version nor an arm64 pull from
+  GHCR is verified.
+
+The classic Docker builder, used when `docker-buildx` is missing, does not
+define `BUILDPLATFORM`; the `container-runtime` role installs `docker-buildx`.
+
+To roll back, set `ember_image_source: build` in the inventory. The Dockerfile
+change is independent.

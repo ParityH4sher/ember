@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "review/coder",
+  "providers": {
+    "review": {
+      "name": "Review gateway",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "env": ["REVIEW_WORKLOAD_ID"],
+      "settings": {"baseURL": "http://model-gateway:8080/v1"},
+      "models": {"coder": {"modelID": "{env:REVIEW_MODEL}"}}
+    }
+  }
+}

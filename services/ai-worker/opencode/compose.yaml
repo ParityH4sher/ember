@@ -1,0 +1,65 @@
+name: ember-review
+services:
+  panel:
+    build:
+      context: ../../../apps/api
+      dockerfile: cmd/agent-panel/Dockerfile
+    environment:
+      EMBER_PANEL_PASSWORD: ${EMBER_PANEL_PASSWORD:?set a random operator password}
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:?set a separate random worker password}
+    ports: ["127.0.0.1:${EMBER_PANEL_PORT:-3010}:8080"]
+    networks: [panel-ingress, task]
+    depends_on: [opencode-worker]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 64
+
+  opencode-worker:
+    image: ghcr.io/anomalyco/opencode:2.3.2@sha256:be07cc4afd6d668d91b77accf1bc4338c87b39fbacc0a61666eb003781015f5a
+    runtime: io.containerd.kata.v2
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    user: "65532:65532"
+    working_dir: /workspace
+    environment:
+      HOME: /home/agent
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD}
+      REVIEW_MODEL: ${REVIEW_MODEL:?set the model ID served by your gateway}
+      REVIEW_WORKLOAD_ID: disposable-review
+    volumes:
+      - ./example.go.txt:/workspace/example.go:ro
+      - ./worker.json:/etc/opencode/opencode.json:ro
+    tmpfs:
+      - /home/agent:uid=65532,gid=65532,mode=0700,size=256m
+      - /workspace:uid=65532,gid=65532,mode=0700,size=64m
+      - /tmp:size=128m,mode=1777
+    networks: [task]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+
+  # Only this fixed model operation crosses the internal task network.
+  model-gateway:
+    image: nginx:1.30.7-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
+    user: "65532:65532"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ['envsubst ''$${REVIEW_MODEL_ORIGIN}'' < /etc/review.conf.template > /tmp/nginx.conf; exec nginx -c /tmp/nginx.conf -g "daemon off;"']
+    environment:
+      REVIEW_MODEL_ORIGIN: ${REVIEW_MODEL_ORIGIN:?set the operator-controlled model origin}
+    volumes: ["./model-gateway.conf:/etc/review.conf.template:ro"]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 64m
+    networks: [task, model-egress]
+
+networks:
+  task: { internal: true }
+  panel-ingress: {}
+  model-egress: {}

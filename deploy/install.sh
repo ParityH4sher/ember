@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -f deploy/compose.yaml || ! -f apps/api/Dockerfile || ! -f apps/frontend/Dockerfile ]]; then
+if [[ ! -f deploy/compose.yaml || ! -f deploy/gateway/Dockerfile || ! -f apps/api/Dockerfile || ! -f apps/frontends/home/Dockerfile || ! -f apps/frontends/web/Dockerfile ]]; then
   echo "Run install.sh from the extracted Ember Compose bundle directory." >&2
   exit 1
 fi
@@ -27,6 +27,10 @@ if ! "${compose[@]}" version >/dev/null 2>&1; then
   exit 1
 fi
 compose+=(-f deploy/compose.yaml)
+# Optional OpenID Connect sign-in; see docs/authentication.md.
+if [[ -n "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
+  compose+=(-f deploy/compose.oidc.yaml)
+fi
 if [[ $# -eq 1 && $1 == --check ]]; then
   "${compose[@]}" config --quiet
   echo "Ember Compose configuration is valid."

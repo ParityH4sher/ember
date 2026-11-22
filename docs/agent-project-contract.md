@@ -101,6 +101,49 @@ must not be able to grant themselves permissions or bypass host authorization.
 
 ## Task work contract
 
+### Linked project notes and resuming a task
+
+When exchanging a project with notes, use the
+[v1 notes profile](pathname:///project-schema/v1.notes.schema.json) of the
+[portable manifest contract](pathname:///project-schema/README.md). List notes as
+Markdown source files with project-relative paths; backlinks can be rebuilt.
+
+Open **Project notes** on the Ember home page (`/apps/notes/`). **Create project**
+creates `notes/index.md` and `notes/handoff.md` and opens the index automatically.
+Browse or filter the note list, edit Markdown and save, follow a link, or use
+**Backlinks** to see which notes refer to the open one. A link to a missing note
+opens a new draft. Both `[[note title]]` and `[label](relative/path.md)` work.
+The files are ordinary UTF-8 Markdown. For portable links use paths relative to the
+containing note, e.g. `[material choice](decisions/material.md)`. No Obsidian
+plugin, database or provider session is required. Start at `index.md`, then
+read `handoff.md` for the current goal, last verified result and next step.
+Link longer evidence and decisions from those notes instead of loading a whole
+transcript on every run.
+
+**Available now:** an operator-side CLI for local handoffs. From `apps/api`,
+with an existing project directory and separate trusted parent for task copies:
+
+```sh
+go run ./cmd/ember-notes stage /data/project-a /tasks/run-1
+# Give the sandbox only run-1 as its writable notes workspace.
+# It writes decisions/material.md and links it from handoff.md.
+# Stop the sandbox and review the changed files before publishing.
+go run ./cmd/ember-notes publish /data/project-a /tasks/run-1 decisions/material.md handoff.md
+go run ./cmd/ember-notes stage /data/project-a /tasks/run-2 decisions/material.md
+```
+
+`stage` fills in missing starter notes and creates a new workspace with the index, handoff and any explicitly
+selected topic notes. Links do not automatically bring other files into scope.
+`publish` copies only named Markdown files (up to 256 KiB each); the durable
+vault stays outside the sandbox. Keep workspace parents operator-controlled
+and publish only from a stopped task with no writers. Publish linked topics
+before the handoff: replacement is atomic per file, not per batch. Serialize
+CLI publishes with browser edits; the browser detects stale browser saves, but
+the CLI does not merge changes. Automatic staging and publication by a sandbox
+runner are future integration work.
+
+### Run instructions
+
 For each run, Ember should provide the agent:
 
 - The project definition and relevant project instructions.

@@ -1,0 +1,8 @@
+*
+!src/
+!src/**
+!static/
+!static/**
+!package*.json
+!tsconfig.json
+!vite.config.ts

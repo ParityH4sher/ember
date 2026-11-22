@@ -150,7 +150,9 @@ These are longer-horizon ideas, not commitments or shipped features:
 ## Current implementation
 
 This wishlist is broader than the software in this repository. Today, the
-runtime is a Go health API and static Nginx frontend; agent sessions, voice,
-memory, fabrication workflows, authentication, persistence, and the other
-catalogued capabilities are not implemented. See [architecture status](architecture/README.md)
+runtime is a Go API with filesystem-backed project notes, in-memory plugin
+configuration and one versioned Weather-to-Open-Meteo operation, plus an Nginx
+frontend with a linked-note editor; agent sessions, voice, personal memory,
+fabrication workflows and authentication
+are not implemented. See [architecture status](architecture/README.md)
 and [core installation](core-installation.md).

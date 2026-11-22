@@ -18,5 +18,6 @@
   roles:
     - base
     - security
+    - tailscale
     - container-runtime
     - ember

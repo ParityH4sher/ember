@@ -15,7 +15,7 @@ out=$(cd -- "$1" && pwd)
 work=$(mktemp -d "$out/.ember-build.XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/$bundle"
-git -C "$repo" archive "$commit" -- apps/api apps/frontend deploy/compose.yaml deploy/install.sh deploy/bundle-readme.md |
+git -C "$repo" archive "$commit" -- apps/api apps/frontends/home apps/frontends/web deploy/gateway deploy/compose.yaml deploy/compose.oidc.yaml deploy/compose.edge.yaml deploy/install.sh deploy/bundle-readme.md |
   tar -xf - -C "$work/$bundle"
 cd "$work"
 mv "$bundle/deploy/install.sh" "$bundle/install.sh"

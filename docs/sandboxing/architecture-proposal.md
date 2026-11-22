@@ -3,10 +3,11 @@
 - **Status:** Reviewed proposal; policy and runtime implementation are incremental.
 - **Scope:** Security boundaries for service integrations, processing jobs,
   executable plugins, AI tools, and shared infrastructure.
-- **Implementation status:** Ember currently ships a health API and static
-  frontend only. It does not yet implement authentication, capability
-  authorization, an integration registry, a job runner, or an infrastructure
-  controller.
+- **Implementation status:** Ember ships a health API, prototype project/plugin
+  configuration endpoints, and one fixed Weather-to-Open-Meteo operation. It
+  does not implement authentication, capability authorization, a general plugin
+  loader, a job runner, or an infrastructure controller. Do not expose the
+  unauthenticated API to an untrusted network.
 
 [Sandboxing overview](README.md) · [POC implementation brief](https://github.com/ParityH4sher/ember/blob/main/EMBER_POC_IMPLEMENTATION_BRIEF.md)
 

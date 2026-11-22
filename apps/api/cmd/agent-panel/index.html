@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engineering task · Ember</title>
+<style>
+  :root { color-scheme: light dark; font: 1rem/1.5 system-ui, sans-serif }
+  body { max-width: 52rem; margin: 3rem auto; padding: 0 1rem }
+  textarea { display: block; box-sizing: border-box; width: 100%; margin: .5rem 0 }
+  button { padding: .4rem .8rem; margin-right: .5rem }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere }
+</style>
+<main>
+  <h1>Engineering task</h1>
+  <p>Disposable review workspace · one operator session</p>
+  <p id="connection" role="status">Connecting…</p>
+  <section aria-label="Recent conversation"><pre id="history"></pre></section>
+  <section aria-label="Live progress"><pre id="live"></pre></section>
+  <section aria-label="Permission requests" id="permissions"></section>
+  <form id="form">
+    <label for="prompt">Task or steering message</label>
+    <textarea id="prompt" rows="3" maxlength="8000" required placeholder="Review example.go."></textarea>
+    <button id="send" disabled>Send / steer</button>
+    <button type="button" id="stop" disabled>Stop run</button>
+  </form>
+  <p id="notice" role="status"></p>
+</main>
+<script type="module" src="./panel.js"></script>
+</html>

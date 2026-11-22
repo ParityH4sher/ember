@@ -48,8 +48,9 @@ This repository's `contracts/openapi.yaml` currently declares OpenAPI 3.1.0.
 The hosted Swagger UI is pinned to `swagger-ui-dist` 5.17.14. Research found
 Swagger UI added basic OpenAPI 3.2.0 support in 5.32.0; therefore, do not change
 the contract to 3.2.x until the renderer and every CI/codegen tool are upgraded
-and tested together. For the current health-only API, 3.1.x is sufficient.
-Re-evaluate 3.2 when defining task event streaming.
+and tested together. The current HTTP API contracts, including versioned plugin
+operation discovery/invocation, fit OpenAPI 3.1.x. Re-evaluate 3.2 when defining
+task event streaming.
 
 ### 2. AsyncAPI covers event-driven contracts, not all HTTP APIs
 

@@ -16,15 +16,29 @@
       #status { color: #f0b44c; }
       #status.ok { color: #3fb950; }
       code { color: #79c0ff; }
+      a { color: #79c0ff; }
+      article { border-top: 1px solid #30363d; padding: 1em 0; }
+      label, input, textarea, select { display: block; margin: .5em 0; }
+      input, textarea, select { padding: .4em; max-width: 95%; }
+      button, summary { cursor: pointer; }
+      button { padding: .4em .7em; }
+      fieldset, details { margin: .8em 0; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
     <main>
       <h1>Ember</h1>
       <p>A self-hosted workspace for turning ideas into engineered artifacts.</p>
+      <section id="account" class="card" aria-live="polite" hidden></section>
       <section class="card" aria-live="polite">
         <strong>Core API:</strong> <span id="status">checking…</span>
-        <p>This is an early platform scaffold. Project and task workflows are not implemented yet.</p>
+        <p><a style="color:#79c0ff" href="/apps/notes/">Open project notes →</a></p>
+      </section>
+      <section class="card"><h2>Shared services</h2><div id="services">Loading services…</div></section>
+      <section class="card"><h2>Plugins</h2>
+        <p>Settings are local to this Ember instance and reset on API restart. Use test credentials only.</p>
+        <div id="plugins">Loading plugins…</div>
       </section>
     </main>
     <script>
@@ -39,5 +53,6 @@
         document.querySelector('#status').textContent = 'unavailable';
       });
     </script>
+    <script type="module" src="/integrations.js"></script>
   </body>
 </html>

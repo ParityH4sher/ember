@@ -3,6 +3,10 @@
 This component is not implemented. Its future responsibility is to execute a
 persisted Ember task using an agent runtime behind a replaceable interface.
 
+For an interactive single-task experiment, see the
+[OpenCode review panel](opencode/README.md). It has its own operator login,
+Compose project, and disposable worker; it is not a persisted Ember task service.
+
 ## Required boundary
 
 - Receive a task ID and a scoped, time-limited execution grant from the API.
@@ -14,4 +18,6 @@ persisted Ember task using an agent runtime behind a replaceable interface.
 - Run in a disposable sandbox with denied-by-default networking and resource
   limits. Container isolation alone is not a complete security boundary.
 
+The [sandbox router prototype](../sandbox-router/README.md) exercises the
+launch boundary locally, before a persisted task/grant protocol is available.
 See [sandboxing](../../docs/sandboxing/README.md).

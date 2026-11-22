@@ -11,10 +11,9 @@ sidebar_position: 3
 
 This page is a proposal, not a replacement for
 [ADR 003](../decisions/003-ai-gateway-shortlist.md), which remains the current
-gateway decision record. In particular, this page proposes Bifrost as the first
-combined-gateway experiment, while ADR 003 recommends first establishing a
-monitored provider adapter and conditionally comparing candidates. Resolve that
-difference through a reviewed ADR update before adopting or deploying a gateway.
+gateway decision record. Ember will use existing gateway software. This page
+compares alternatives; the selected first experiment uses LiteLLM alone for
+both model routing and MCP tool access. No production product is selected.
 
 ## 1. Context and goals
 
@@ -98,9 +97,8 @@ components, and an attractive combined-gateway experiment.
 security boundary; per-agent and per-tenant authorization; resource usage; and
 Raspberry Pi/ARM64 support.
 
-**Current recommendation:** primary candidate for an initial combined-gateway
-experiment, subject to qualification. This is not an approved production
-dependency.
+**Current recommendation:** alternative combined gateway if the LiteLLM pilot
+reveals a concrete gap.
 
 ### LiteLLM
 
@@ -116,8 +114,8 @@ API, and support for local and cloud endpoints.
 **Risks to verify:** deployment and operational requirements; licensing and
 feature availability; and the need for a separate MCP/tool gateway.
 
-**Current recommendation:** strong candidate for the LLM component in a
-modular architecture.
+**Current recommendation:** selected first pilot for both LLM routing and MCP
+access. Verify the required controls in the self-hosted edition on the Pi.
 
 ### agentgateway
 
@@ -426,7 +424,7 @@ cloud. Do not assume the Pi should host local inference.
 
 ### Phase 3 — MCP integration
 
-- Deploy one read-only Paperless integration (or documented lighter substitute).
+- Test one read-only Immich tool with disposable accounts.
 - Expose it through the selected tool gateway.
 - Create two distinct agent identities.
 - Authorize one identity and verify the other is denied.
@@ -435,7 +433,7 @@ cloud. Do not assume the Pi should host local inference.
 ### Phase 4 — Sandbox verification
 
 - Run agents in isolated sandboxes.
-- Deny direct access to Paperless and model-provider APIs.
+- Deny direct access to Immich and model-provider APIs.
 - Permit only approved gateway routes.
 - Verify credentials are absent from sandboxes.
 - Test credential revocation and blocked infrastructure access.
@@ -490,7 +488,7 @@ The gateway POC succeeds when:
 
 ## 15. Recommendation and decision status
 
-Evaluate Bifrost first as a combined gateway candidate for the Pi POC. Preserve
+Evaluate LiteLLM alone for both model routing and MCP access on the Pi. Preserve
 interfaces so the system can later separate into an Ember Task Router, LLM
 gateway, MCP gateway, sandbox manager, identity/policy service, integration
 registry, and observability components.

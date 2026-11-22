@@ -2,3 +2,42 @@
 ember_install_dir: /opt/ember
 ember_http_port: 3000
 ember_project_name: ember
+
+# Where Ember's images come from:
+#   build     copy the source to the host and build the images there;
+#   registry  pull the images that CI publishes (the `images` job in
+#             .github/workflows/build.yml) with deploy/compose.registry.yaml.
+#             The host needs no source, and every run pulls ember_image_tag
+#             again, so `latest` deploys the newest build of main.
+ember_image_source: build
+# Registry namespace of the images, such as ghcr.io/<owner>. The images are
+# <namespace>/ember-api, ember-home, ember-notes and ember-gateway.
+ember_image_registry: ""
+# `latest` (the newest build of main) or `sha-<full commit>` to pin a version.
+ember_image_tag: latest
+# Only for private packages: a GitHub username and a classic token with
+# read:packages. Supply the token from a Vault file, never the inventory.
+# Public packages need neither.
+ember_registry_username: ""
+ember_registry_token: ""
+
+# Attach Ember's gateway to the shared internal `edge` network as
+# `ember-gateway`, so the Traefik ingress can route to it
+# (deploy/compose.edge.yaml). The homelab inventory enables it with
+# ingress_domain.
+ember_edge_enabled: false
+
+# Optional OpenID Connect sign-in (docs/authentication.md). The homelab
+# inventory enables it with the ingress and the Authentik stack, and derives
+# these values from the same settings that render Authentik's Ember blueprint.
+ember_oidc_enabled: false
+ember_oidc_issuer: ""
+ember_oidc_client_id: ember
+ember_oidc_redirect_url: ""
+ember_oidc_post_logout_redirect_url: ""
+ember_oidc_allowed_groups: []
+ember_oidc_session_ttl: 8h
+# Supply the client secret from Vault when Authentik runs elsewhere. Otherwise
+# it is read from the Authentik stack on this host, which generates it.
+ember_oidc_client_secret: ""
+ember_oidc_client_secret_source: /opt/stacks/authentik/secrets/ember_oidc_client_secret

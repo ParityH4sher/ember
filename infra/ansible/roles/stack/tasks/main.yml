@@ -1,0 +1,217 @@
+---
+# Deploys one shared service stack from infra/stacks/<name>. The playbook
+# supplies `stack` ({name, env, tailnet_ports, wait_timeout}). This role never
+# stops a stack or removes its volumes (DEC-006).
+
+- name: Locate the stack definition
+  ansible.builtin.set_fact:
+    stack_source: "{{ stack_sources_dir }}/{{ stack.name }}"
+    stack_dir: "{{ stacks_root }}/{{ stack.name }}"
+
+- name: Require a known stack
+  ansible.builtin.assert:
+    that:
+      - stack.name is match('^[a-z][a-z0-9-]{0,30}$')
+      - (stack_source ~ '/compose.yaml') is file
+    fail_msg: "Stack '{{ stack.name }}' needs infra/stacks/{{ stack.name }}/compose.yaml."
+    quiet: true
+
+# Use a differently named input: facts outrank task vars, so reusing the fact
+# name would read the previous stack's manifest on later loop iterations.
+- name: Read the stack's declared secrets and settings
+  ansible.builtin.set_fact:
+    stack_manifest: "{{ manifest }}"
+    stack_secret_names: "{{ manifest.secrets | default({}) | dict2items | map(attribute='key') | list }}"
+    stack_generated: "{{ (manifest['x-ember-stack'] | default({}))['generated-secrets'] | default([]) }}"
+    # The repository's .env (read by the playbook) first, then Vault values on top.
+    stack_supplied: >-
+      {{ (stack_env_secrets | default({}))[stack.name] | default({})
+         | combine(stack_secrets[stack.name] | default({})) }}
+    stack_env: "{{ stack.env | default({}) }}"
+  vars:
+    manifest: "{{ lookup('ansible.builtin.file', stack_source ~ '/compose.yaml') | from_yaml }}"
+
+- name: Require the stack conventions (infra/stacks/README.md)
+  ansible.builtin.assert:
+    that:
+      - stack_manifest.name | default('') == 'stack-' ~ stack.name
+      - stack_supplied.keys() | difference(stack_secret_names) | length == 0
+    fail_msg: >-
+      {{ stack.name }}: compose.yaml must set `name: stack-{{ stack.name }}`, and
+      stack_secrets.{{ stack.name }} may only contain declared secrets
+      ({{ stack_secret_names | join(', ') }}).
+    quiet: true
+
+- name: Require secrets to be files in the stack's secrets directory
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[a-z][a-z0-9_]{0,62}$')
+      - (item.value.file | default('')) == './secrets/' ~ item.key
+    fail_msg: "{{ stack.name }}: secret {{ item.key }} must use `file: ./secrets/{{ item.key }}`."
+    quiet: true
+  loop: "{{ stack_manifest.secrets | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Require plain, single-line settings
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[A-Z][A-Z0-9_]*$')
+      - (item.value | string) is not search("['\r\n]")
+    fail_msg: "{{ stack.name }}: setting {{ item.key }} must be an uppercase name with a single-line value without quotes."
+    quiet: true
+  loop: "{{ stack_env | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create the stack directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ stacks_root }}", mode: "0755"}
+    - {path: "{{ stack_dir }}", mode: "0750"}
+    - {path: "{{ stack_dir }}/secrets", mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Install the Compose manifest
+  ansible.builtin.copy:
+    src: "{{ stack_source }}/compose.yaml"
+    dest: "{{ stack_dir }}/compose.yaml"
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+
+- name: Write non-secret settings
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible from the inventory. See infra/stacks/{{ stack.name }}/.env.example.
+      {% for key, value in stack_env | dictsort %}
+      {{ key }}='{{ value }}'
+      {% endfor %}
+    dest: "{{ stack_dir }}/.env"
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0600"
+
+# Secret files are bind-mounted individually and read by non-root container
+# users, so the files are 0444 inside the 0700 secrets directory.
+- name: Install operator-supplied secrets
+  ansible.builtin.copy:
+    content: "{{ stack_supplied[item] }}"
+    dest: "{{ stack_dir }}/secrets/{{ item }}"
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0444"
+  loop: "{{ stack_secret_names | select('in', stack_supplied) | list }}"
+  register: stack_supplied_writes
+  no_log: true
+
+- name: Generate missing random secrets once
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}"
+    dest: "{{ stack_dir }}/secrets/{{ item }}"
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0444"
+    force: false
+  loop: "{{ stack_secret_names | reject('in', stack_supplied) | select('in', stack_generated) | list }}"
+  register: stack_generated_writes
+  no_log: true
+
+- name: Look for secrets that only the operator can provide
+  ansible.builtin.stat:
+    path: "{{ stack_dir }}/secrets/{{ item }}"
+  loop: "{{ stack_secret_names | reject('in', stack_supplied) | reject('in', stack_generated) | list }}"
+  register: stack_required_secrets
+
+- name: Require operator-provided secrets
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: >-
+      {{ stack.name }} needs the secret {{ item.item }}. Add
+      stack_secrets.{{ stack.name }}.{{ item.item }} to your Ansible Vault file
+      or create {{ stack_dir }}/secrets/{{ item.item }} on the host.
+    quiet: true
+  loop: "{{ stack_required_secrets.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: List the stack's templates
+  ansible.builtin.set_fact:
+    stack_templates: "{{ tree | selectattr('state', 'equalto', 'file') | selectattr('path', 'search', '\\.j2$') | list }}"
+    stack_template_dirs: "{{ tree | selectattr('state', 'equalto', 'directory') | list }}"
+  vars:
+    tree: "{{ query('community.general.filetree', stack_source ~ '/templates') }}"
+
+# Directories stay readable (0755): containers read mounted config as users
+# that do not own it, including root without CAP_DAC_OVERRIDE.
+- name: Create directories for generated configuration
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/{{ item.path }}"
+    state: directory
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0755"
+  loop: "{{ stack_template_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# A template that renders to nothing (an optional feature that is switched
+# off) is not installed, and an earlier copy is removed. ansible-core 2.19+
+# turns an empty rendering into None, so normalize it before testing.
+- name: Render generated configuration
+  ansible.builtin.copy:
+    content: "{{ rendered }}\n"
+    dest: "{{ stack_dir }}/{{ item.path | regex_replace('\\.j2$', '') }}"
+    owner: "{{ stack_owner }}"
+    group: "{{ stack_group }}"
+    mode: "0644"
+  loop: "{{ stack_templates }}"
+  loop_control:
+    label: "{{ item.path }}"
+  vars:
+    rendered: "{{ lookup('ansible.builtin.template', item.src) | default('', true) | trim }}"
+  when: rendered | length > 0
+  register: stack_template_writes
+
+- name: Remove generated configuration that renders empty
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/{{ item.path | regex_replace('\\.j2$', '') }}"
+    state: absent
+  loop: "{{ stack_templates }}"
+  loop_control:
+    label: "{{ item.path }}"
+  vars:
+    rendered: "{{ lookup('ansible.builtin.template', item.src) | default('', true) | trim }}"
+  when: rendered | length == 0
+  register: stack_template_removals
+
+# Compose does not notice changed contents of mounted files, so recreate the
+# containers when a secret or generated file changed. Traefik would also pick
+# up route changes by itself; Authentik applies blueprints when it starts.
+- name: Reconcile the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    state: present
+    pull: missing
+    recreate: >-
+      {{ 'always' if (stack_supplied_writes is changed or stack_generated_writes is changed
+                      or stack_template_writes is changed or stack_template_removals is changed)
+         else 'auto' }}
+    wait: true
+    wait_timeout: "{{ stack.wait_timeout | default(stack_wait_timeout) }}"
+
+- name: Admit tailnet traffic to the stack's entry points
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: tailscale0
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ stack.tailnet_ports | default([]) }}"

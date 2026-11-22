@@ -1,0 +1,8 @@
+---
+# Shared internal Docker networks for the public ingress (ADR 010).
+#   tunnel: cloudflared <-> Traefik only.
+#   edge:   Traefik <-> the front-facing container of each routed service.
+# Their names are fixed in the Compose files that join them.
+ingress_network_names:
+  - tunnel
+  - edge

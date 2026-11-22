@@ -13,4 +13,3 @@ RUN apt-get update \
 
 USER node
 WORKDIR /workspaces/ember
-CMD ["bash", ".devcontainer/start-docs.sh"]

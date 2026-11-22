@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -13,6 +12,12 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
+	"github.com/ParityH4sher/ember/apps/api/internal/httpapi"
+	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
+	"github.com/ParityH4sher/ember/apps/api/internal/plugins/gitea"
+	"github.com/ParityH4sher/ember/apps/api/internal/projects"
 )
 
 // CI stamps this file in the source bundle. A checkout identifies itself as development.
@@ -41,8 +46,35 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer listener.Close()
+	root := os.Getenv("EMBER_PROJECT_ROOT")
+	if root == "" {
+		root = "projects"
+	}
+	vaults, err := projects.OpenVaults(root)
+	if err != nil {
+		return err
+	}
+	services, err := httpapi.ParseServiceLinks(os.Getenv("EMBER_SERVICE_LINKS"))
+	if err != nil {
+		return err
+	}
+	var extra []plugins.Registration
+	if repo := os.Getenv("EMBER_GITEA_REPOSITORY_URL"); repo != "" {
+		registration, err := gitea.Register(repo)
+		if err != nil {
+			return err
+		}
+		extra = append(extra, registration)
+	}
+	// Sign-in stays disabled unless an OpenID Connect configuration file is supplied.
+	authConfig, err := auth.LoadConfig(os.Getenv("EMBER_AUTH_CONFIG_FILE"), os.Getenv("EMBER_OIDC_CLIENT_SECRET_FILE"))
+	if err != nil {
+		return err
+	}
+	authn := auth.New(authConfig, auth.Options{Logger: logger})
 	srv := &http.Server{
-		Handler:           accessLog(logger, httpHandler()),
+		Handler:           accessLog(logger, authn.Wrap(httpapi.NewDeploymentHandler(version, vaults, services, extra))),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -50,7 +82,7 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 		MaxHeaderBytes:    16 << 10,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	logger.Info("api listening", "address", listener.Addr().String(), "version", version)
+	logger.Info("api listening", "address", listener.Addr().String(), "version", version, "auth", authn.Mode())
 	// Leave time for a forced close before Compose's default ten-second stop deadline.
 	if err := serve(ctx, srv, listener, 5*time.Second); err != nil {
 		return err
@@ -78,16 +110,4 @@ func serve(ctx context.Context, srv *http.Server, listener net.Listener, grace t
 		}
 		return err
 	}
-}
-
-func httpHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":  "ok",
-			"version": version,
-		})
-	})
-	return mux
 }

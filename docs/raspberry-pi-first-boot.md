@@ -102,3 +102,35 @@ After reboot, continue with the [Ansible host provisioning and Compose
 deployment guide](operations/README.md#ansible-host-provisioning). The current
 Ember API has no authentication, so keep its frontend loopback-bound and do not
 expose it directly to an untrusted network; see [deployment](deployment.md).
+
+## Private access with Tailscale
+
+The Ansible play installs Tailscale and configures Tailscale Serve after the Pi
+has joined your tailnet. Before serving HTTPS, a tailnet administrator must
+enable **MagicDNS** and **HTTPS certificates** in the Tailscale admin console
+(DNS settings). This is a one-time tailnet-wide setting; it is intentionally
+not changed by host provisioning.
+
+On the Pi, start enrollment and complete the URL-based sign-in:
+
+```sh
+sudo tailscale up
+```
+
+Then rerun the Ansible playbook. It will publish the loopback-bound Ember
+frontend through Serve. Check the route and open its `https://…ts.net` address:
+
+```sh
+sudo tailscale serve status
+```
+
+If Serve is not configured, the Tailscale CLI output should explain which
+tailnet setting or permission is missing. A manual fallback is:
+
+```sh
+sudo tailscale serve --bg http://127.0.0.1:3000
+```
+
+Serve is available only to devices permitted by your tailnet policy; do not
+enable Funnel. Tailscale does not add application authentication, and the Ember
+API remains unauthenticated.

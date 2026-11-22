@@ -2,14 +2,29 @@ openapi: 3.1.0
 info:
   title: Ember API
   version: 0.1.0
-  description: Initial API contract. Authentication and project/task endpoints are not implemented.
+  description: >-
+    This prototype stores project records and Markdown notes on disk.
+    Plugin configuration is process-local. OpenID Connect sign-in is optional
+    and off by default; without it there is no authentication, so do not expose
+    the API to an untrusted network or use real credentials. When the operator
+    configures sign-in, every route except /healthz and /v1/auth/* requires the
+    session cookie, state-changing requests must come from the configured
+    browser origin, and signed-in access pauses while the identity provider is
+    unreachable. Signed-in users are not yet distinguished by project or role.
+    Plugin configuration and plugin operations are prototype behavior; only the
+    Weather plugin currently makes a fixed upstream request. Other listed
+    plugins may be configuration-only.
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:3000/api
+security:
+  - {}
+  - sessionCookie: []
 paths:
   /healthz:
     get:
       operationId: getHealth
       summary: Check API process health
+      security: []
       responses:
         "200":
           description: API process is running
@@ -25,7 +40,644 @@ paths:
               example:
                 status: ok
                 version: development
+  /v1/auth/session:
+    get:
+      operationId: getAuthSession
+      summary: Report whether sign-in is enabled and who is signed in
+      description: >-
+        Always available, so browser clients can decide whether to offer
+        sign-in. A stale or unknown session cookie is cleared.
+      security: []
+      responses:
+        "200":
+          description: Current sign-in state
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+              examples:
+                disabled:
+                  value: {enabled: false, authenticated: false}
+                signedIn:
+                  value:
+                    enabled: true
+                    authenticated: true
+                    user: {subject: 3f9c, name: Ada Lovelace, email: ada@example.com, groups: [makers]}
+                    expiresAt: "2026-11-21T20:00:00Z"
+  /v1/auth/login:
+    get:
+      operationId: startLogin
+      summary: Start OpenID Connect sign-in
+      description: >-
+        Browser navigation, not a fetch. Redirects to the identity provider's
+        authorization endpoint (authorization code flow with PKCE and a nonce)
+        and sets a short-lived, HttpOnly state cookie.
+      security: []
+      parameters:
+        - name: returnTo
+          in: query
+          description: Local path to open after sign-in. Anything other than an absolute path on this origin is replaced with /.
+          schema:
+            type: string
+            default: /
+      responses:
+        "302":
+          description: Redirect to the identity provider
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "404":
+          $ref: "#/components/responses/AuthNotConfigured"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+  /v1/auth/callback:
+    get:
+      operationId: completeLogin
+      summary: Complete OpenID Connect sign-in
+      description: >-
+        The identity provider redirects here; register this URL, including the
+        gateway's /api prefix, as the client's redirect URI. Ember checks the
+        state cookie, redeems the code, validates the ID token (signature,
+        issuer, audience, expiry and nonce), applies the optional group policy,
+        and sets an HttpOnly session cookie. Tokens are never sent to the browser.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          description: Set by the identity provider when sign-in did not complete.
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Signed in; redirect to the requested local path
+          headers:
+            Location:
+              schema:
+                type: string
+        "400":
+          description: Missing, expired or mismatched sign-in state, or no authorization code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: The provider refused sign-in or returned an invalid ID token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The user is not in an allowed group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/AuthNotConfigured"
+        "502":
+          description: The authorization code could not be redeemed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      summary: End the Ember session
+      description: >-
+        Removes the server-side session and clears its cookie. When the provider
+        advertises an end_session_endpoint, the response includes a URL that ends
+        the provider session too; navigate the browser there.
+      security: []
+      responses:
+        "200":
+          description: Signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResult"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "404":
+          $ref: "#/components/responses/AuthNotConfigured"
+  /v1/projects/{projectId}:
+    delete:
+      operationId: deleteProject
+      summary: Delete a project
+      description: Removes the active project record. Notes stay on disk and the identifier remains reserved.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "204":
+          description: Project deleted
+        "404":
+          description: Project does not exist or is not visible to the caller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Project cannot currently be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects:
+    get:
+      operationId: listProjects
+      summary: List active projects
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Projects registered on this instance
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [projects]
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      summary: Create a project and seed its Markdown index and handoff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                  pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$'
+                name:
+                  type: string
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "201":
+          description: Project record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Project identifier already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/notes:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listProjectNotes
+      summary: Load Markdown notes for this project's browser link index
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Project-relative paths mapped to Markdown text
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notes]
+                properties:
+                  notes:
+                    type: object
+                    additionalProperties: {type: string}
+        "404": {description: Project not found}
+        "413": {description: Vault exceeds text or size limits}
+    put:
+      operationId: saveProjectNote
+      summary: Create or replace one Markdown note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [path, content]
+              properties:
+                path: {type: string, description: Relative non-hidden .md path within the project's notes directory}
+                content: {type: string}
+                previous: {type: [string, "null"], description: Exact last-read text for replacement; omit or use null for creation}
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "204": {description: Note saved}
+        "400": {description: Invalid note path or body}
+        "404": {description: Project not found}
+        "409": {description: Stored content differs from the supplied previous content}
+        "413": {description: Note or project exceeds the size limit}
+  /v1/services:
+    get:
+      operationId: listServiceLinks
+      summary: Public browser links to operator-configured shared services
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Read-only service directory; empty when no links are configured.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services]
+                properties:
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, url]
+                      properties:
+                        name: {type: string}
+                        url: {type: string, format: uri}
+  /v1/plugins:
+    get:
+      operationId: listPlugins
+      summary: List plugins available to this Ember deployment
+      description: >-
+        Lists only plugins included and enabled for discovery by the server
+        deployment. A plugin not included in the deployment must not be
+        advertised or have its client code delivered. This endpoint reports
+        backend-provided capabilities and configuration schemas; it does not
+        transfer executable plugin code to the browser.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Available plugin integrations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [plugins]
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plugin"
+  /v1/plugins/{pluginId}:
+    get:
+      operationId: getPlugin
+      summary: Get an available plugin and its current configuration state
+      description: Returns configuration values safe for display; secret values are never returned.
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Plugin metadata and current non-secret configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        "404":
+          description: Plugin is not included in or available to this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/plugins/{pluginId}/activation:
+    put:
+      operationId: setPluginActivation
+      summary: Activate or deactivate an available plugin
+      description: >-
+        Sets this instance's activation flag for the integration. This prototype
+        does not yet perform upstream service operations. Deactivation does not
+        stop or modify the independently operated upstream service.
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [active]
+              properties:
+                active:
+                  type: boolean
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Activation state updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        "404":
+          description: Plugin is not included in or available to this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Plugin cannot be activated until its configuration is valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/plugins/{pluginId}/configuration:
+    get:
+      operationId: getPluginConfiguration
+      summary: Get the safe-to-display plugin configuration
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Current non-secret configuration values and configuration schema
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfiguration"
+        "404":
+          description: Plugin is not included in or available to this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: setPluginConfiguration
+      summary: Replace plugin-specific configuration
+      description: >-
+        All plugins use this common configuration envelope, while each plugin
+        supplies its own JSON Schema describing the fields in values. The
+        backend validates values against that schema. Secret inputs must be
+        write-only and stored server-side; responses must never disclose secret
+        values. Configuration connects this Ember instance to an upstream
+        service (for example, Immich); it does not install or operate that
+        service.
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [values]
+              properties:
+                values:
+                  type: object
+                  description: Plugin-specific values validated against its advertised configurationSchema.
+                  additionalProperties: true
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Configuration saved; returned values are safe to display and contain no secret material
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfiguration"
+        "404":
+          description: Plugin is not included in or available to this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Values do not satisfy the plugin configuration schema
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/plugins/{pluginId}/api:
+    get:
+      operationId: listPluginOperations
+      summary: List the API operations exposed by an available plugin
+      description: >-
+        Returns only operations explicitly implemented and allowlisted by this
+        plugin. The frontend uses Ember API operation URLs;
+        upstream service origins, paths, and credentials remain private to the
+        backend.
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Frontend-facing operation catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginApiCatalog"
+        "404":
+          description: Plugin is not included in or available to this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/plugins/{pluginId}/api/{apiVersion}/{operationId}:
+    post:
+      operationId: invokePluginOperation
+      summary: Invoke an allowlisted plugin operation
+      description: >-
+        The backend resolves operationId and apiVersion against the plugin's
+        registered operation definitions, validates inputs, and routes the
+        request to that operation's fixed upstream service route. Clients
+        cannot supply an upstream URL, path, HTTP method, or credential. The
+        backend must enforce caller authorization, plugin activation,
+        destination policy, operation scopes, timeouts, response limits, and
+        audit policy before forwarding. This must not be an unrestricted
+        reverse proxy.
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+        - name: apiVersion
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PluginOperationInput"
+            example:
+              pathParams: {}
+              query: {}
+              body:
+                latitude: 47.6
+                longitude: -122.3
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Plugin operation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginOperationResult"
+        "404":
+          description: Plugin or operation is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Plugin is not active or configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Operation input is invalid or denied by policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Upstream service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Operation is declared but its adapter is not implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-ember_session
+      description: >-
+        Opaque session ID set by /v1/auth/callback when OpenID Connect sign-in
+        is configured. Over plain HTTP (loopback development only) the cookie is
+        named ember_session. Sessions are held in API memory, expire after the
+        configured sessionTtl, and end when the API restarts.
+  responses:
+    Unauthenticated:
+      description: Sign-in is configured and the request has no valid session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: {code: unauthenticated, message: sign in to use Ember}
+    CrossOriginRequest:
+      description: Sign-in is configured and a state-changing request came from another origin
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: {code: cross_origin_request, message: cross-origin writes are not allowed}
+    IdentityProviderUnavailable:
+      description: The identity provider is unreachable; sign-in and signed-in access are paused
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: {code: identity_provider_unavailable, message: the sign-in service is unavailable}
+    AuthNotConfigured:
+      description: Sign-in is not configured on this instance
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: {code: auth_not_configured, message: sign-in is not configured on this Ember instance}
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+    PluginId:
+      name: pluginId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
     Health:
       type: object
@@ -37,3 +689,166 @@ components:
           const: ok
         version:
           type: string
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    AuthUser:
+      type: object
+      additionalProperties: false
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: The identity provider's stable subject identifier (sub claim).
+        name:
+          type: string
+        email:
+          type: string
+        groups:
+          type: array
+          items:
+            type: string
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required: [enabled, authenticated]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether OpenID Connect sign-in is configured.
+        authenticated:
+          type: boolean
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        expiresAt:
+          type: string
+          format: date-time
+    LogoutResult:
+      type: object
+      additionalProperties: false
+      properties:
+        endSessionUrl:
+          type: string
+          format: uri
+          description: Identity provider logout URL, present when the provider supports RP-initiated logout.
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    Plugin:
+      type: object
+      additionalProperties: false
+      required: [id, name, version, apiVersion, active, configured, capabilities, configurationSchema, configuration]
+      properties:
+        id:
+          type: string
+          description: Stable plugin identifier, such as immich.
+        name:
+          type: string
+        version:
+          type: string
+          description: Plugin implementation version using semantic versioning.
+        apiVersion:
+          type: string
+          description: Plugin HTTP contract major version used in invocation routes, e.g. 1.
+        description:
+          type: string
+        active:
+          type: boolean
+        configured:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+        configurationSchema:
+          type: object
+          description: JSON Schema describing this plugin's distinct values object.
+          additionalProperties: true
+        configuration:
+          type: object
+          description: Safe-to-display configuration; secret values are omitted.
+          additionalProperties: true
+    PluginConfiguration:
+      type: object
+      additionalProperties: false
+      required: [values, configurationSchema]
+      properties:
+        values:
+          type: object
+          description: Safe-to-display configured values; secret values are omitted.
+          additionalProperties: true
+        configurationSchema:
+          type: object
+          description: JSON Schema describing this plugin's distinct values object.
+          additionalProperties: true
+    PluginApiCatalog:
+      type: object
+      additionalProperties: false
+      required: [pluginVersion, apiVersion, operations]
+      properties:
+        pluginVersion:
+          type: string
+        apiVersion:
+          type: string
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginOperation"
+    PluginOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, name, method, path, inputSchema, outputSchema]
+      properties:
+        operationId:
+          type: string
+          description: Stable plugin-local identifier used in the Ember invocation URL.
+        name:
+          type: string
+        description:
+          type: string
+        method:
+          type: string
+          const: POST
+          description: Ember-facing invocation method; upstream method is private to the adapter.
+        path:
+          type: string
+          description: Ember-facing path template, never an upstream URL.
+        inputSchema:
+          type: object
+          description: JSON Schema for the invocation input envelope.
+          additionalProperties: true
+        outputSchema:
+          type: object
+          description: JSON Schema for the sanitized operation result.
+          additionalProperties: true
+    PluginOperationInput:
+      type: object
+      additionalProperties: false
+      required: [pathParams, query, body]
+      properties:
+        pathParams:
+          type: object
+          additionalProperties: false
+        query:
+          type: object
+          additionalProperties: false
+        body:
+          type: object
+          additionalProperties: true
+    PluginOperationResult:
+      type: object
+      additionalProperties: false
+      properties:
+        data: {}

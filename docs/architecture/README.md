@@ -29,13 +29,23 @@ flowchart TB
 
 ## Implemented now
 
-- `apps/api`: Go HTTP process exposing `GET /healthz`.
-- `apps/frontend`: static status page; Nginx proxies `/api/` to the API.
-- `deploy/compose.yaml`: defines the API and frontend on one host. Both build
-  contexts are relative to this manifest. The frontend is
+- `apps/api`: Go HTTP process exposing `GET /healthz` plus prototype project and
+  plugin-configuration endpoints. Projects and their Markdown notes live on
+  disk; plugin configuration is lost on restart. Optional OpenID Connect
+  sign-in ([`internal/auth`](../authentication.md)) is off by default; without
+  it there is no authentication. The Weather plugin proxies one
+  fixed operation to Open-Meteo; the bundled Immich entry stores configuration
+  only and does not call Immich.
+- `apps/frontends`: the status page (`home/`) and SvelteKit linked Markdown PWA
+  (`web/`) build and run independently.
+- `deploy/compose.yaml`: runs the API, both frontends, and a gateway on one host.
+  The gateway proxies `/`, `/apps/notes/`, and `/api/` and is
   published on loopback by default at `http://127.0.0.1:3000`.
 - `infra/ansible`: initial Debian/Ubuntu host preparation and Compose deployment.
-- `contracts/openapi.yaml`: contract for the implemented health endpoint.
+  It installs Tailscale; an already-enrolled device gets a private Serve route,
+  and first-time enrollment can use an auth key supplied through Ansible Vault.
+- `contracts/openapi.yaml`: contract for health, projects, Markdown notes, and
+  plugin discovery/configuration endpoints.
 - `contracts/project-schema/`: initial portable project manifest schema.
 
 ## Planned boundaries

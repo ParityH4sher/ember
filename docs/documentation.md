@@ -16,9 +16,11 @@ Requires rootless Podman and the Dev Container CLI. From the repository root:
 devcontainer up --docker-path podman --workspace-folder .
 ```
 
-Open <http://localhost:3000> after the initial compilation. Every container start
-runs `npm ci` from the lockfile, then starts Docusaurus as its main process.
-No manual `npm install` or `npm start` is needed.
+The first container creation installs dependencies from the lockfile. When the
+workspace opens in VS Code, the **Ember docs: start** task launches Docusaurus
+in its own visible terminal; stop it with `Ctrl+C` or the terminal stop button.
+Open <http://localhost:3000> after the initial compilation. To start it manually,
+run `npm --prefix website start` in the devcontainer terminal.
 
 Use the container ID returned by the command:
 
@@ -38,9 +40,14 @@ Ansible, Python, Make, and GitHub CLI. Use the
 for provisioning; the devcontainer's distribution Ansible may be older.
 It maps the host user to the container's `node` user with Podman's `keep-id`
 namespace. The workspace mount supports shared SELinux labeling. Port 3000 is
-published on host loopback and configured for editor forwarding.
+published on host loopback and configured for editor forwarding. The notes
+client uses its own loopback port, 5173. Run the VS Code task **Ember web:
+start** to start Vite and its Go API, then open `http://localhost:5173/apps/notes/`.
+Container creation installs the web toolchain from `apps/frontends/web/package-lock.json`
+and runs `svelte-check` and the worker type check. The web and docs dependencies
+live in container volumes separate from host `node_modules`.
 
-VS Code installs extensions for GitHub Actions and pull requests, Go, Docker
+VS Code installs extensions for Svelte, GitHub Actions and pull requests, Go, Docker
 file editing, Ansible, YAML, OpenAPI, Markdown linting/preview, and EditorConfig.
 The Docker extension provides Compose editing support; the container does not
 mount a Docker/Podman socket or run privileged containers. Run Compose against
@@ -48,7 +55,8 @@ your host runtime separately when needed.
 
 Edit files under `docs/`; the browser updates automatically. Polling handles
 bind-mounted file changes. Rebuild the container after changing its configuration
-or Containerfile. Restart it after dependency changes to reinstall from the lockfile.
+or Containerfile. To reinstall after dependency changes, run
+`npm --prefix website ci`.
 
 ### Troubleshooting stale Docusaurus paths
 
