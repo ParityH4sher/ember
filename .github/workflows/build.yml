@@ -26,8 +26,33 @@ jobs:
       - run: python3 -B -m unittest discover -s chat-fixture
         working-directory: services/sandbox-router
 
+  # The web app against a mocked API (apps/frontends/web/tests/ui): sign-in
+  # page, shell, roles, pages, session expiry, mobile layout and axe checks.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontends/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-test-report
+          path: |
+            apps/frontends/web/playwright-report/
+            apps/frontends/web/test-results/
+          retention-days: 14
+
   bundle:
-    needs: test
+    needs: [test, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

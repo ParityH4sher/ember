@@ -16,6 +16,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -23,8 +25,9 @@ const (
 	methodPost  = "client_secret_post"
 	methodNone  = "none"
 
-	maxConfigBytes = 64 << 10
-	maxSecretBytes = 4 << 10
+	maxConfigBytes      = 64 << 10
+	maxSecretBytes      = 4 << 10
+	maxProviderNameRune = 64
 )
 
 // Config is the operator's OpenID Connect client configuration. It is read
@@ -51,6 +54,11 @@ type Config struct {
 	AdminGroups []string `json:"adminGroups,omitempty"`
 	// SessionTTL is a Go duration such as "8h"; sessions do not renew.
 	SessionTTL string `json:"sessionTtl,omitempty"`
+	// ProviderName is the identity provider's display name, such as
+	// "Authentik", which the web app shows on its sign-in button.
+	ProviderName string `json:"providerName,omitempty"`
+	// AccountURL is where people manage their own account at the provider.
+	AccountURL string `json:"accountUrl,omitempty"`
 
 	clientSecret string
 	sessionTTL   time.Duration
@@ -137,6 +145,21 @@ func (c *Config) validate() error {
 	}
 	if c.PostLogoutRedirectURL != "" {
 		if _, err := endpointURL(c.PostLogoutRedirectURL, "postLogoutRedirectUrl"); err != nil {
+			return err
+		}
+	}
+
+	c.ProviderName = strings.TrimSpace(c.ProviderName)
+	if utf8.RuneCountInString(c.ProviderName) > maxProviderNameRune {
+		return fmt.Errorf("providerName must be at most %d characters", maxProviderNameRune)
+	}
+	for _, r := range c.ProviderName {
+		if !unicode.IsPrint(r) {
+			return errors.New("providerName must contain only printable characters")
+		}
+	}
+	if c.AccountURL != "" {
+		if _, err := endpointURL(c.AccountURL, "accountUrl"); err != nil {
 			return err
 		}
 	}

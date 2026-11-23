@@ -1,0 +1,93 @@
+# Overlay: keep sign-in sessions in Redis, so they survive an API restart
+# (ADR 014, docs/authentication.md). It belongs with deploy/compose.oidc.yaml;
+# install.sh and the Ansible ember role always add both together. Without them:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml \
+#     -f deploy/compose.redis.yaml up -d
+# EMBER_REDIS_PASSWORD_FILE is the absolute host path of the Redis password:
+# one line of letters, digits, - and _. Both the API (UID 65532) and Redis
+# (UID 999, with supplementary group 65532) read it, so make it owned by
+# 65532:65532 with mode 0440. install.sh generates it when it is missing.
+# Redis is reachable only from the API, on the internal `sessions` network.
+services:
+  api:
+    environment:
+      EMBER_REDIS_ADDR: redis:6379
+      EMBER_REDIS_PASSWORD_FILE: /run/secrets/ember-redis-password
+    volumes:
+      - type: bind
+        source: ${EMBER_REDIS_PASSWORD_FILE:?set EMBER_REDIS_PASSWORD_FILE to the host path of the Redis password}
+        target: /run/secrets/ember-redis-password
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      sessions: {}
+
+  redis:
+    # Redis 8 is tri-licensed (RSALv2, SSPLv1, AGPLv3); Valkey is a BSD-licensed
+    # drop-in replacement that the API also works with. Pinned by the
+    # multi-architecture index digest.
+    image: docker.io/library/redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
+    # The image's redis user; group 65532 may read the shared password file.
+    user: "999:1000"
+    group_add:
+      - "65532"
+    # Write the password into a config file on a tmpfs, so that it never
+    # appears in a command line or the environment. The image's entrypoint is
+    # bypassed: it only drops root privileges and loads modules Ember does not use.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        password=
+        IFS= read -r password < /run/secrets/ember-redis-password || true
+        case "$$password" in
+          ""|*[!A-Za-z0-9_-]*)
+            echo "The Redis password file must hold one line of letters, digits, - and _." >&2
+            exit 1 ;;
+        esac
+        umask 077
+        printf 'requirepass %s\n' "$$password" > /tmp/redis.conf
+        unset password
+        exec redis-server /tmp/redis.conf --port 6379 --protected-mode yes \
+          --dir /data --appendonly yes --appendfsync everysec --save "" \
+          --maxmemory 96mb --maxmemory-policy volatile-ttl
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    volumes:
+      - redis-data:/data
+      - type: bind
+        source: ${EMBER_REDIS_PASSWORD_FILE:?set EMBER_REDIS_PASSWORD_FILE to the host path of the Redis password}
+        target: /run/secrets/ember-redis-password
+        read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 192m
+    cpus: 0.5
+    restart: unless-stopped
+    expose:
+      - "6379"
+    healthcheck:
+      # REDISCLI_AUTH keeps the password off redis-cli's command line.
+      test: ["CMD-SHELL", "IFS= read -r REDISCLI_AUTH < /run/secrets/ember-redis-password; export REDISCLI_AUTH; redis-cli -h 127.0.0.1 -p 6379 ping | grep -qx PONG"]
+      # Short, because the API waits for the first healthy check to start.
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sessions
+
+networks:
+  # Internal: no route to the outside, and only the API and Redis are attached.
+  sessions:
+    internal: true
+
+volumes:
+  # Sessions and ID tokens. Disposable: exclude from backups (ADR 014).
+  redis-data:

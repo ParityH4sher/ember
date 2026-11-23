@@ -37,11 +37,15 @@ flowchart TB
   fixed operation to Open-Meteo; the bundled Immich entry stores configuration
   only and does not call Immich.
 - `apps/frontends/web`: the single browser frontend, an installable SvelteKit
-  app with the home page (status, service links, plugins) at `/` and linked
-  Markdown project notes at `/apps/notes/`.
+  app: sign-in page, dashboard, linked Markdown project notes at
+  `/apps/notes/`, plugins, settings, account and admin pages in one shell.
 - `deploy/compose.yaml`: runs the API, the web frontend, and a gateway on one
   host. The gateway proxies `/api/` to the API and everything else to the
   frontend, and is published on loopback by default at `http://127.0.0.1:3000`.
+  With sign-in on, `deploy/compose.oidc.yaml` configures the API and
+  `deploy/compose.redis.yaml` adds a Redis session store on an internal
+  network that only the API joins
+  ([ADR 014](../decisions/014-redis-session-store.md)).
 - `infra/ansible`: initial Debian/Ubuntu host preparation and Compose deployment.
   It installs Tailscale; an already-enrolled device gets a private Serve route,
   and first-time enrollment can use an auth key supplied through Ansible Vault.

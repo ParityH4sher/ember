@@ -19,9 +19,10 @@ The current Compose installation runs three services:
   Sign-in is optional [OpenID Connect](authentication.md) and is off by
   default. Without it the API has no authentication; do not expose it to an
   untrusted network or configure real service credentials.
-- **Web** (`apps/frontends/web`): the installable browser app. Its home page
-  (`/`) shows API status, shared service links and plugin forms; Project notes
-  (`/apps/notes/`) is the linked-note editor.
+- **Web** (`apps/frontends/web`): the installable browser app. It has a
+  sign-in page (`/login/`), a dashboard (`/`), Project notes (`/apps/notes/`),
+  plugins, settings, account and admin pages in one shell; see
+  [`apps/frontends/README.md`](https://github.com/ParityH4sher/ember/blob/main/apps/frontends/README.md).
 - **Gateway** (`deploy/gateway`, Compose service `frontend`): routes `/api/` to
   the API and every other path to Web.
 

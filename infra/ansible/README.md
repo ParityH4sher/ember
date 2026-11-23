@@ -190,8 +190,11 @@ described in the [cloudflared stack](../stacks/cloudflared/README.md).
 With `ingress_domain` set and Authentik among the default services, the
 inventory sets `ember_oidc_enabled` and derives the issuer and the redirect
 URLs. `stacks.yml` registers the matching client in Authentik as a blueprint.
-`site.yml` then writes Ember's `auth.json`, installs the shared client secret
-for the API, and deploys the `deploy/compose.oidc.yaml` overlay. It also stops
+`site.yml` then writes Ember's `auth.json` (including the provider name
+"Authentik" and the link to Authentik's user interface for the web app),
+installs the shared client secret for the API, generates a Redis password, and
+deploys the `deploy/compose.oidc.yaml` and `deploy/compose.redis.yaml` overlays.
+Sign-in sessions are kept in that Redis container (ADR 014). It also stops
 publishing Ember through Tailscale Serve, because sign-in only works on Ember's
 public URL. Run `stacks.yml` first, then `site.yml`. Details are in the
 [Authentik stack](../stacks/authentik/README.md#connecting-ember) and the

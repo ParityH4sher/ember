@@ -701,9 +701,54 @@ func TestParseConfig(t *testing.T) {
 		"unknown field":            {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","clientSecret":"inline"}`, "s"},
 		"empty admin group":        {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","adminGroups":[" "]}`, "s"},
 		"trailing data":            {valid + `{}`, "s"},
+		"http account URL":         {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","accountUrl":"http://auth.example/if/user/"}`, "s"},
+		"relative account URL":     {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","accountUrl":"/if/user/"}`, "s"},
+		"script account URL":       {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","accountUrl":"javascript:alert(1)"}`, "s"},
+		"long provider name":       {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","providerName":"` + strings.Repeat("x", 65) + `"}`, "s"},
+		"control in provider name": {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","providerName":"Auth\nentik"}`, "s"},
 	} {
 		if _, err := ParseConfig([]byte(tc.raw), tc.secret); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestProviderInfo(t *testing.T) {
+	cfg, err := ParseConfig([]byte(`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb",
+		"providerName":"  Authentik  ","accountUrl":"https://auth.example/if/user/"}`), "s")
+	if err != nil || cfg.ProviderName != "Authentik" || cfg.AccountURL != "https://auth.example/if/user/" {
+		t.Fatalf("%+v, %v", cfg, err)
+	}
+	if _, err := ParseConfig([]byte(`{"issuer":"http://127.0.0.1:9000/o/","clientId":"ember","redirectUrl":"http://localhost/cb",
+		"accountUrl":"http://localhost:9000/if/user/","providerName":"`+strings.Repeat("é", 64)+`"}`), ""); err != nil {
+		t.Fatalf("loopback account URL or 64-character name refused: %v", err)
+	}
+
+	idp := newFakeIdP(t)
+	for _, tc := range []struct{ name, account, signedOut string }{
+		{"Authentik", "https://auth.example/if/user/",
+			`{"authenticated":false,"enabled":true,"provider":{"name":"Authentik","accountUrl":"https://auth.example/if/user/"}}`},
+		{"Authentik", "", `{"authenticated":false,"enabled":true,"provider":{"name":"Authentik"}}`},
+		{"", "https://auth.example/if/user/", `{"authenticated":false,"enabled":true,"provider":{"accountUrl":"https://auth.example/if/user/"}}`},
+		{"", "", `{"authenticated":false,"enabled":true}`},
+	} {
+		cfg := testConfig(t, idp)
+		cfg.ProviderName, cfg.AccountURL = tc.name, tc.account
+		h := newTestHandler(t, idp, cfg)
+		if got := strings.TrimSpace(do(h, http.MethodGet, "/v1/auth/session", nil, nil).Body.String()); got != tc.signedOut {
+			t.Errorf("signed out: %s want %s", got, tc.signedOut)
+		}
+		var body struct {
+			Authenticated bool
+			Provider      *struct{ Name, AccountURL string }
+		}
+		session := signIn(t, h, idp)
+		if err := json.Unmarshal(do(h, http.MethodGet, "/v1/auth/session", []*http.Cookie{session}, nil).Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Authenticated || (body.Provider != nil) != (tc.name != "" || tc.account != "") ||
+			body.Provider != nil && (body.Provider.Name != tc.name || body.Provider.AccountURL != tc.account) {
+			t.Errorf("signed in: %+v", body)
 		}
 	}
 }

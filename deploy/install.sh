@@ -26,10 +26,21 @@ if ! "${compose[@]}" version >/dev/null 2>&1; then
   echo "Docker Compose v2 or Podman with a Compose provider is required." >&2
   exit 1
 fi
+runtime=${compose[0]}
 compose+=(-f deploy/compose.yaml)
-# Optional OpenID Connect sign-in; see docs/authentication.md.
+# Optional OpenID Connect sign-in; see docs/authentication.md. Its sessions
+# live in Redis (deploy/compose.redis.yaml), whose password file defaults to
+# redis-password next to the client secret (or the configuration file).
 if [[ -n "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
-  compose+=(-f deploy/compose.oidc.yaml)
+  compose+=(-f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml)
+  if [[ -z "${EMBER_REDIS_PASSWORD_FILE:-}" ]]; then
+    EMBER_REDIS_PASSWORD_FILE="$(dirname -- "${EMBER_OIDC_CLIENT_SECRET_FILE:-$EMBER_AUTH_CONFIG_FILE}")/redis-password"
+  fi
+  if [[ "$EMBER_REDIS_PASSWORD_FILE" != /* ]]; then
+    echo "EMBER_REDIS_PASSWORD_FILE must be an absolute host path." >&2
+    exit 2
+  fi
+  export EMBER_REDIS_PASSWORD_FILE
 fi
 if [[ $# -eq 1 && $1 == --check ]]; then
   "${compose[@]}" config --quiet
@@ -38,6 +49,37 @@ if [[ $# -eq 1 && $1 == --check ]]; then
 elif (( $# )); then
   echo "Usage: ./install.sh [--check]" >&2
   exit 2
+fi
+
+# Generate the Redis password once. The API (UID 65532) and Redis (UID 999 with
+# supplementary group 65532) read it, so it is owned by 65532:65532, mode 0440.
+# An existing file is left alone, like the OIDC client secret.
+if [[ -n "${EMBER_REDIS_PASSWORD_FILE:-}" && ! -e "$EMBER_REDIS_PASSWORD_FILE" ]]; then
+  dir=$(dirname -- "$EMBER_REDIS_PASSWORD_FILE")
+  if [[ ! -d "$dir" ]]; then
+    echo "Create $dir first, or set EMBER_REDIS_PASSWORD_FILE." >&2
+    exit 1
+  fi
+  tmp=$(mktemp "$dir/.redis-password.XXXXXXXX")
+  trap 'rm -f -- "$tmp"' EXIT
+  # 32 random bytes as 64 hex digits; Redis accepts letters, digits, - and _.
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$tmp"
+  echo >> "$tmp"
+  chmod 0440 "$tmp"
+  if (( EUID == 0 )); then
+    chown 65532:65532 "$tmp"
+  elif [[ "$runtime" == podman ]]; then
+    podman unshare chown 65532:65532 "$tmp"
+  else
+    echo "Generated a Redis password, but only root can give it to UID 65532. Run:" >&2
+    echo "  sudo chown 65532:65532 '$tmp' && mv -- '$tmp' '$EMBER_REDIS_PASSWORD_FILE'" >&2
+    echo "and then run install.sh again." >&2
+    trap - EXIT
+    exit 1
+  fi
+  mv -- "$tmp" "$EMBER_REDIS_PASSWORD_FILE"
+  trap - EXIT
+  echo "Generated the Redis password in $EMBER_REDIS_PASSWORD_FILE"
 fi
 
 # --remove-orphans stops services that this version no longer defines, such as

@@ -52,8 +52,9 @@ The Ansible setup installs Tailscale but requires manual device enrollment;
 see the [operations guide](operations/README.md#ansible-host-provisioning).
 
 The `frontend` gateway routes `/api/` to `api` and every other path to `web`,
-the single browser app: the home page at `/` and Project notes at
-`/apps/notes/`.
+the single browser app: the sign-in page at `/login/`, the dashboard at
+`/`, Project notes at `/apps/notes/`, and the plugins, settings, account and
+admin pages.
 
 The installer accepts decimal ports `1` through `65535` without leading zeros.
 `EMBER_COMPOSE_RUNTIME=podman` or `docker` selects a specific provider; the
@@ -88,8 +89,13 @@ The API stores active project records and Markdown notes under `EMBER_PROJECT_RO
 `projects` volume). Open `/apps/notes/` on the frontend to edit them. Removing
 the volume removes its data. Removing a project record retains its notes on disk.
 Plugin configuration is lost on API restart. Sign-in is optional
-[OpenID Connect](authentication.md), off by default. There is no database, task execution, or agent
-behavior. Weather sends coordinates to Open-Meteo; its free API is
+[OpenID Connect](authentication.md), off by default. With sign-in on,
+`install.sh` and the Ansible role also run a Redis container that keeps
+sign-in sessions across API restarts (`deploy/compose.redis.yaml`,
+[session store](authentication.md#session-store)). Its `redis-data` volume
+holds ID tokens: protect it, and leave it out of backups, because losing it
+only signs everyone out. There is no database for application data, task
+execution, or agent behavior. Weather sends coordinates to Open-Meteo; its free API is
 non-commercial and requires attribution. Do not expose this prototype to an
 untrusted network or configure real upstream credentials. The Immich plugin
 reads only the server version, the key's user and album metadata; give it a

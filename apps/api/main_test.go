@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,5 +141,26 @@ func TestProjectDeleteLifecycle(t *testing.T) {
 	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodDelete, "/v1/projects/demo", nil))
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("second delete status=%d want 404", missing.Code)
+	}
+}
+
+// Redis only stores sign-in sessions, so an address without sign-in is a
+// configuration mistake, as is a password file without an address.
+func TestRedisNeedsSignIn(t *testing.T) {
+	t.Setenv("EMBER_PROJECT_ROOT", t.TempDir())
+	t.Setenv("EMBER_AUTH_CONFIG_FILE", "")
+	t.Setenv("EMBER_OIDC_CLIENT_SECRET_FILE", "")
+	t.Setenv("EMBER_AGENTS_CONFIG_FILE", "")
+	logger := slog.New(slog.DiscardHandler)
+	for name, env := range map[string][2]string{
+		"address without sign-in":  {"127.0.0.1:6379", ""},
+		"password without address": {"", filepath.Join(t.TempDir(), "redis-password")},
+	} {
+		t.Setenv("EMBER_REDIS_ADDR", env[0])
+		t.Setenv("EMBER_REDIS_PASSWORD_FILE", env[1])
+		err := run(context.Background(), "127.0.0.1:0", logger)
+		if err == nil || !strings.Contains(err.Error(), "EMBER_REDIS") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

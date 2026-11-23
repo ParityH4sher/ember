@@ -47,6 +47,6 @@
 {/each}
 
 <style>
-  fieldset { margin: .8rem 0; border: 1px solid #34404c; border-radius: .3rem }
-  small { display: block; color: #9da7b3 }
+  fieldset { margin: .8rem 0; border: 1px solid var(--border); border-radius: .3rem }
+  small { display: block; color: var(--muted) }
 </style>

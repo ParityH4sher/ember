@@ -31,6 +31,23 @@ for name, directory in (("api", "apps/api"), ("web", "apps/frontends/web"), ("fr
 assert all(not services[s].get("ports") for s in ("api", "web"))
 assert [p["host_ip"] for p in services["frontend"]["ports"]] == ["127.0.0.1"]
 '
+# Sign-in overlays: Redis is reachable only from the API, on an internal network.
+EMBER_AUTH_CONFIG_FILE=/etc/ember/auth.json EMBER_OIDC_CLIENT_SECRET_FILE=/etc/ember/oidc-client-secret \
+  EMBER_REDIS_PASSWORD_FILE=/etc/ember/redis-password \
+  docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml config --format json |
+  python3 -c '
+import json, sys
+config = json.load(sys.stdin)
+services = config["services"]
+assert sorted(services) == ["api", "frontend", "redis", "web"], sorted(services)
+assert sorted(services["api"]["networks"]) == ["backend", "sessions"]
+assert sorted(services["redis"]["networks"]) == ["sessions"]
+assert all("sessions" not in services[s]["networks"] for s in ("frontend", "web"))
+assert config["networks"]["sessions"]["internal"] is True
+assert not services["redis"].get("ports")
+assert "@sha256:" in services["redis"]["image"]
+assert services["api"]["environment"]["EMBER_REDIS_ADDR"] == "redis:6379"
+'
 export COMPOSE_PROJECT_NAME="$project"
 EMBER_HTTP_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 export EMBER_HTTP_PORT

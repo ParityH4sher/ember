@@ -1,99 +1,86 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Account from '../lib/Account.svelte';
-  import PluginCard from '../lib/PluginCard.svelte';
+  import Card from '../lib/ui/Card.svelte';
+  import PageHeader from '../lib/ui/PageHeader.svelte';
+  import Stat from '../lib/ui/Stat.svelte';
+  import ServiceLinks from '../lib/ServiceLinks.svelte';
   import {
-    getHealth, getSession, listPlugins, listServices, signInUrl,
-    type Health, type Plugin, type ServiceLink, type Session
+    getHealth, listAgents, listPlugins, listProjects,
+    type AgentList, type Health, type Plugin, type Project
   } from '../lib/api';
+  import { failure, settle, type Loaded } from '../lib/load';
+  import { auth } from '../lib/session.svelte';
 
-  // Each is undefined while loading. health is null when the API is unreachable;
-  // services and plugins hold the error message when they could not be loaded.
-  let health = $state.raw<Health | null>(), session = $state.raw<Session | null>(null);
-  let services = $state.raw<ServiceLink[] | string>(), plugins = $state.raw<Plugin[] | string>();
-  let signedOut = $derived(Boolean(session?.enabled && !session.authenticated));
-  // Without sign-in every caller is an admin.
-  let admin = $derived(!session?.enabled || session.role === 'admin');
+  let health = $state.raw<Loaded<Health>>(), projects = $state.raw<Loaded<Project[]>>();
+  let plugins = $state.raw<Loaded<Plugin[]>>(), agents = $state.raw<Loaded<AgentList>>();
+  let firstName = $derived(auth.user?.name?.split(' ')[0]);
 
-  const failure = (error: unknown) => error instanceof Error ? error.message : String(error);
+  const count = <T,>(v: Loaded<T[]>) => v === undefined ? undefined : failure(v) ? '—' : v.length;
+  let activePlugins = $derived(Array.isArray(plugins) ? plugins.filter(p => p.active).length : undefined);
+  let needsSetup = $derived(Array.isArray(plugins) ? plugins.filter(p => !p.configured).length : 0);
 
-  // Only http(s) links without credentials are shown.
-  function serviceUrl(raw: string): string | null {
-    try {
-      const url = new URL(raw);
-      return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : null;
-    } catch {
-      return null;
-    }
-  }
-
-  onMount(async () => {
-    getHealth().then(h => { health = h; }, () => { health = null; });
-    session = await getSession();
-    if (signedOut) return;
-    listServices().then(r => { services = r.services; }, e => { services = failure(e); });
-    listPlugins().then(r => { plugins = r.plugins; }, e => { plugins = failure(e); });
+  onMount(() => {
+    settle(getHealth(), v => (health = v));
+    settle(listProjects().then(r => r.projects), v => (projects = v));
+    settle(listPlugins().then(r => r.plugins), v => (plugins = v));
+    settle(listAgents(), v => (agents = v));
   });
 </script>
 
-<svelte:head><title>Ember</title></svelte:head>
-{#snippet signInFirst(what: string)}
-  <p><a href={signInUrl('/')}>Sign in</a> to view {what}.</p>
-{/snippet}
-<header>Ember <Account {session} /></header>
-<main>
-  <h1>Ember</h1>
-  <p class="lede">A self-hosted workspace for turning ideas into engineered artifacts.</p>
-  <section class="card" aria-live="polite">
-    <strong>Core API:</strong>
-    <span id="status" class:ok={health}>
-      {health === undefined ? 'checking…' : health ? `${health.status} (version ${health.version})` : 'unavailable'}
-    </span>
-    <p><a href="/apps/notes/">Open project notes →</a></p>
-  </section>
-  <section class="card">
-    <h2>Shared services</h2>
-    {#if signedOut}
-      {@render signInFirst('services')}
-    {:else if services === undefined}
-      <p>Loading services…</p>
-    {:else if typeof services === 'string'}
-      <p>Unable to load services: {services}</p>
+<PageHeader title="Dashboard" lede={firstName ? `Welcome back, ${firstName}.` : 'A self-hosted workspace for turning ideas into engineered artifacts.'} />
+
+<div class="stats">
+  <Stat label="Core API" href={auth.admin ? '/admin/' : undefined}
+    value={health === undefined ? undefined : failure(health) ? 'Unavailable' : health.status}
+    tone={health === undefined ? undefined : failure(health) ? 'danger' : 'ok'}
+    detail={health && !failure(health) ? `Version ${health.version}` : undefined} />
+  <Stat label="Projects" value={count(projects)} href="/apps/notes/" detail="Linked notes and chats" />
+  <Stat label="Active plugins" href="/plugins/"
+    value={plugins === undefined ? undefined : failure(plugins) ? '—' : `${activePlugins} / ${plugins.length}`}
+    detail={needsSetup ? `${needsSetup} need configuration` : undefined} tone={needsSetup ? 'warn' : undefined} />
+  <Stat label="Agents" value={agents === undefined ? undefined : failure(agents) ? '—' : agents.enabled ? agents.agents.length : 'Off'}
+    detail={agents && !failure(agents) && !agents.enabled ? 'Chat runs are disabled' : 'Available for project chat'} />
+</div>
+
+<div class="grid">
+  <Card title="Projects" id="projects">
+    {#snippet actions()}<a href="/apps/notes/">Open notes →</a>{/snippet}
+    {#if projects === undefined}
+      <p class="muted">Loading projects…</p>
+    {:else if failure(projects)}
+      <p role="alert">Unable to load projects: {projects.error}</p>
     {:else}
-      {#each services as service}
-        {@const url = serviceUrl(service.url)}
-        {#if url}<p><a href={url} referrerpolicy="no-referrer">Open {service.name} →</a></p>{/if}
-      {:else}
-        <p>No services configured.</p>
-      {/each}
+      <ul class="list">
+        {#each projects.slice(0, 8) as p (p.id)}
+          <li><a href={'/apps/notes/?' + new URLSearchParams({ project: p.id })}>{p.name}</a>
+            <span class="muted">{p.id}</span></li>
+        {:else}
+          <li class="muted">No projects yet. <a href="/apps/notes/">Create one in Project notes.</a></li>
+        {/each}
+      </ul>
+      {#if projects.length > 8}<p class="muted">and {projects.length - 8} more</p>{/if}
     {/if}
-  </section>
-  <section class="card">
-    <h2>Plugins</h2>
-    <p>Settings are local to this Ember instance and reset on API restart. Use test credentials only.</p>
-    {#if signedOut}
-      {@render signInFirst('plugins')}
-    {:else if plugins === undefined}
-      <p>Loading plugins…</p>
-    {:else if typeof plugins === 'string'}
-      <p>Unable to load plugins: {plugins}</p>
-    {:else}
-      {#each plugins as plugin (plugin.id)}
-        <PluginCard {plugin} {admin}
-          onchange={updated => { if (Array.isArray(plugins)) plugins = plugins.map(p => p.id === updated.id ? updated : p); }} />
-      {:else}
-        <p>No plugins configured.</p>
-      {/each}
-    {/if}
-  </section>
-</main>
+  </Card>
+
+  <Card title="Shared services" id="services">
+    <ServiceLinks />
+  </Card>
+
+  <Card title="Get started" id="start">
+    <ul class="list">
+      <li><a href="/apps/notes/">Write linked notes</a> <span class="muted">Markdown with wiki links and backlinks</span></li>
+      <li><a href="/plugins/">Run plugin operations</a> <span class="muted">Forms built from each plugin's schema</span></li>
+      <li><a href="/settings/">Choose a theme</a> <span class="muted">Light, dark or your system's</span></li>
+      {#if auth.admin}<li><a href="/admin/">Review the instance</a> <span class="muted">Plugins, agents and access</span></li>{/if}
+    </ul>
+  </Card>
+</div>
 
 <style>
-  main {max-width:56rem;margin:auto;padding:1.2rem}
-  h1 {font-size:2rem;margin:.5rem 0 0}
-  .lede {color:#9da7b3}
-  .card {margin-top:1.2rem;padding:1.2rem;border:1px solid #34404c;border-radius:.4rem;background:#192129}
-  .card h2 {font-size:1.2rem;margin-top:0}
-  #status {color:#f0b44c}
-  #status.ok {color:#3fb950}
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: var(--space); margin-bottom: var(--space) }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: var(--space); align-items: start }
+  .list { list-style: none; margin: 0; padding: 0 }
+  .list li { display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: baseline; padding: .35rem 0; border-top: 1px solid var(--border) }
+  .list li:first-child { border-top: 0 }
+  .list .muted { font-size: .85rem }
 </style>

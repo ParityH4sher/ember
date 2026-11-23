@@ -56,8 +56,11 @@ default service. Both sides are generated from the same inventory values
   `https://auth.<ingress_domain>/application/o/ember/`.
 - **Ember side (`site.yml`):** writes `/opt/ember/config/auth.json`, copies the
   same secret into `/opt/ember/config/oidc-client-secret` (owned by the API's
-  UID 65532), and deploys the API with `deploy/compose.oidc.yaml`. It restarts
-  the API when either file changes.
+  UID 65532), and deploys the API with `deploy/compose.oidc.yaml` and the
+  Redis session store (`deploy/compose.redis.yaml`). It restarts the API when
+  either file changes. `auth.json` also names the provider (`Authentik`) and
+  its user interface, `https://auth.<ingress_domain>/if/user/`, which the web
+  app links to for account management.
 - **Network path:** the API reaches `auth.<ingress_domain>` like any other
   client, through Cloudflare and the tunnel. No firewall change is needed. Do
   not put Cloudflare Access in front of `auth.<ingress_domain>` (see the

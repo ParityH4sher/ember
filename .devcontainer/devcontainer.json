@@ -16,7 +16,10 @@
   "remoteUser": "node",
   "containerUser": "node",
   "updateRemoteUserUID": false,
-  "runArgs": ["--userns=keep-id:uid=1000,gid=1000"],
+  "runArgs": [
+    "--userns=keep-id:uid=1000,gid=1000",
+    "--shm-size=1g"
+  ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/ember,type=bind,relabel=shared",
   "workspaceFolder": "/workspaces/ember",
   "mounts": [
@@ -30,8 +33,14 @@
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "init": true,
-  "appPort": ["127.0.0.1:3000:3000", "127.0.0.1:5173:5173"],
-  "forwardPorts": [3000, 5173],
+  "appPort": [
+    "127.0.0.1:3000:3000",
+    "127.0.0.1:5173:5173"
+  ],
+  "forwardPorts": [
+    3000,
+    5173
+  ],
   "portsAttributes": {
     "3000": {
       "label": "Ember docs",
@@ -58,6 +67,7 @@
         "GitHub.vscode-pull-request-github",
         "golang.go",
         "svelte.svelte-vscode",
+        "ms-playwright.playwright",
         "ms-azuretools.vscode-docker",
         "redhat.ansible",
         "redhat.vscode-yaml",

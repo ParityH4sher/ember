@@ -1,0 +1,28 @@
+<script lang="ts" module>
+  // 24×24 stroke icons, drawn inline so that the app loads no icon font.
+  const paths = {
+    home: 'M3 11 12 3l9 8M5 10v10h5v-6h4v6h5V10',
+    notes: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+    plugin: 'M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4',
+    settings: 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M16 16v4',
+    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+    shield: 'M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z M9 12l2 2 4-4',
+    menu: 'M4 6h16M4 12h16M4 18h16',
+    logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',
+    external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6'
+  } as const;
+  export type IconName = keyof typeof paths;
+</script>
+
+<script lang="ts">
+  let { name, size = 20 }: { name: IconName; size?: number } = $props();
+</script>
+
+<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d={paths[name]} />
+</svg>
+
+<style>
+  svg { flex: none; vertical-align: middle }
+</style>

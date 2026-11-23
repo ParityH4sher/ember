@@ -21,6 +21,8 @@ port; use the same settings when inspecting or stopping that instance.
 
 For Docker, use `docker compose -f deploy/compose.yaml ps`, `logs api frontend`
 with the same Compose prefix, or `docker compose -f deploy/compose.yaml down`.
-For Podman, substitute `podman compose`. No database, project data or agent
-runtime ships in this archive. See the [deployment guide](https://parityh4sher.github.io/ember/deployment/)
+For Podman, substitute `podman compose`. With sign-in
+(`EMBER_AUTH_CONFIG_FILE`), `install.sh` also starts a Redis container for
+sign-in sessions and generates its password file; see the sign-in guide. No
+database, project data or agent runtime ships in this archive. See the [deployment guide](https://parityh4sher.github.io/ember/deployment/)
 for operational limits and the checksum procedure.

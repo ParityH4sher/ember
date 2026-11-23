@@ -124,6 +124,7 @@
     # depend on settings. They are used only while ember_oidc_enabled,
     # ember_edge_enabled is true, or ember_image_source is `registry`.
     - compose.oidc.yaml
+    - compose.redis.yaml
     - compose.edge.yaml
     - compose.registry.yaml
 
@@ -219,7 +220,11 @@
              | combine({'allowedGroups': ember_oidc_allowed_groups}
                        if ember_oidc_allowed_groups else {})
              | combine({'adminGroups': ember_oidc_admin_groups}
-                       if ember_oidc_admin_groups else {}) }}
+                       if ember_oidc_admin_groups else {})
+             | combine({'providerName': ember_oidc_provider_name}
+                       if ember_oidc_provider_name else {})
+             | combine({'accountUrl': ember_oidc_account_url}
+                       if ember_oidc_account_url else {}) }}
       register: ember_oidc_config_file
 
     # The API runs as UID 65532 in its container (distroless nonroot).
@@ -233,6 +238,29 @@
         group: "65532"
         mode: "0400"
       register: ember_oidc_secret
+      no_log: true
+
+    - name: Require a Redis password the Redis service accepts
+      ansible.builtin.assert:
+        that:
+          - ember_redis_password is match('^[A-Za-z0-9_-]*$')
+        fail_msg: ember_redis_password may contain only letters, digits, - and _.
+        quiet: true
+      no_log: true
+
+    # Read by the API (UID 65532) and by Redis (UID 999 with supplementary
+    # group 65532). Generated once unless supplied; never replaced afterwards.
+    - name: Install the Redis password
+      ansible.builtin.copy:
+        content: >-
+          {{ ember_redis_password if ember_redis_password
+             else lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}
+        dest: "{{ ember_install_dir }}/config/redis-password"
+        owner: "65532"
+        group: "65532"
+        mode: "0440"
+        force: "{{ ember_redis_password | length > 0 }}"
+      register: ember_redis_secret
       no_log: true
 
 - name: Fingerprint installed build inputs
@@ -280,18 +308,21 @@
   register: ember_reconcile
 
 # The API reads its sign-in files only at startup, and Compose does not notice
-# changed contents of mounted files.
+# changed contents of mounted files. A new Redis password needs Redis restarted
+# too, which keeps its data but makes the API reconnect.
 - name: Restart the API after a sign-in configuration change
   community.docker.docker_compose_v2:
     project_src: "{{ ember_install_dir }}/deploy"
     project_name: "{{ ember_project_name }}"
     files: "{{ ember_compose_files }}"
-    services: [api]
+    services: "{{ ['redis', 'api'] if ember_redis_secret is changed else ['api'] }}"
     state: restarted
   environment: "{{ ember_compose_environment }}"
   when:
     - ember_oidc_enabled | bool
-    - ember_oidc_config_file is changed or ember_oidc_secret is changed
+    - >-
+      ember_oidc_config_file is changed or ember_oidc_secret is changed
+      or ember_redis_secret is changed
     - ember_reconcile is not changed
 
 - name: Record successfully deployed build inputs

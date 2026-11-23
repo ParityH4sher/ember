@@ -4,10 +4,10 @@ ember_from_registry: "{{ ember_image_source == 'registry' }}"
 ember_compose_files: >-
   {{ ['compose.yaml']
      + (['compose.registry.yaml'] if ember_from_registry | bool else [])
-     + (['compose.oidc.yaml'] if ember_oidc_enabled | bool else [])
+     + (['compose.oidc.yaml', 'compose.redis.yaml'] if ember_oidc_enabled | bool else [])
      + (['compose.edge.yaml'] if ember_edge_enabled | bool else []) }}
-# Host paths for deploy/compose.oidc.yaml, which mounts them read-only into the
-# API, the images for deploy/compose.registry.yaml, and the routed host for
+# Host paths for deploy/compose.oidc.yaml and deploy/compose.redis.yaml, which
+# mount them read-only into the API (and Redis), the images for deploy/compose.registry.yaml, and the routed host for
 # deploy/compose.edge.yaml.
 ember_compose_environment: >-
   {{ {'EMBER_HTTP_PORT': ember_http_port | string}
@@ -17,5 +17,6 @@ ember_compose_environment: >-
      | combine({'EMBER_PUBLIC_HOST': ember_public_host}
                if ember_edge_enabled | bool else {})
      | combine({'EMBER_AUTH_CONFIG_FILE': ember_install_dir ~ '/config/auth.json',
-                'EMBER_OIDC_CLIENT_SECRET_FILE': ember_install_dir ~ '/config/oidc-client-secret'}
+                'EMBER_OIDC_CLIENT_SECRET_FILE': ember_install_dir ~ '/config/oidc-client-secret',
+                'EMBER_REDIS_PASSWORD_FILE': ember_install_dir ~ '/config/redis-password'}
                if ember_oidc_enabled | bool else {}) }}

@@ -73,7 +73,25 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	authn := auth.New(authConfig, auth.Options{Logger: logger})
+	// Sessions stay in memory unless a Redis address is supplied.
+	redisConfig, err := auth.LoadRedisConfig(os.Getenv("EMBER_REDIS_ADDR"), os.Getenv("EMBER_REDIS_PASSWORD_FILE"))
+	if err != nil {
+		return err
+	}
+	if redisConfig != nil && authConfig == nil {
+		return errors.New("EMBER_REDIS_ADDR is set but sign-in is not configured (EMBER_AUTH_CONFIG_FILE); " +
+			"Redis only stores sign-in sessions, so unset EMBER_REDIS_ADDR or configure sign-in")
+	}
+	authn := auth.New(authConfig, auth.Options{Logger: logger, Redis: redisConfig})
+	defer authn.Close()
+	if redisConfig != nil {
+		// Start anyway: signed-in access fails closed until Redis answers.
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := authn.CheckSessionStore(pingCtx); err != nil {
+			logger.Warn("session store not reachable yet; sign-in is paused until it answers", "address", redisConfig.Addr, "error", err)
+		}
+		cancel()
+	}
 	// Chat runs stay off unless the operator names an agents configuration file.
 	agentsConfig, err := agents.LoadConfig(os.Getenv("EMBER_AGENTS_CONFIG_FILE"))
 	if err != nil {
@@ -99,7 +117,7 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 		MaxHeaderBytes:    16 << 10,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	logger.Info("api listening", "address", listener.Addr().String(), "version", version, "auth", authn.Mode(), "agents", agentCount)
+	logger.Info("api listening", "address", listener.Addr().String(), "version", version, "auth", authn.Mode(), "sessions", authn.SessionStore(), "agents", agentCount)
 	// Leave time for a forced close before Compose's default ten-second stop deadline.
 	err = serve(ctx, srv, listener, 5*time.Second)
 	if chatRuns != nil {

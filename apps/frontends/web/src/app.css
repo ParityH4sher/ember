@@ -1,11 +1,52 @@
-/* Shared by every page. Page layouts live in each page's own <style>. */
-:root {color-scheme:dark;font:16px/1.5 system-ui,sans-serif;color:#e6edf3;background:#10151b}
-body {margin:0}
-header {padding:1.2rem;background:#192129;border-bottom:1px solid #34404c}
-h2,label {font-size:1rem;font-weight:650;display:block}
-input,select,textarea,button {font:inherit;color:inherit;border:1px solid #516274;background:#202b36;border-radius:.3rem;padding:.35rem .6rem}
-select,input,textarea {box-sizing:border-box;width:100%;margin:.4rem 0}
-textarea {font:1rem/1.5 ui-monospace,monospace;background:#12191f}
-button,a,summary {cursor:pointer}
-button:disabled {cursor:default;opacity:.6}
-a {color:#94caff}
+/* Shared by every page: design tokens, base elements and a few primitives.
+   Page layouts live in each page's own <style>. Colours are tokens so that the
+   light and dark themes (lib/prefs.svelte.ts) only redefine them here. */
+:root {
+  --bg: #10151b; --surface: #192129; --surface-2: #202b36; --sunken: #12191f;
+  --border: #34404c; --border-strong: #516274;
+  --text: #e6edf3; --muted: #9da7b3; --link: #94caff;
+  --accent: #f0883e; --accent-text: #1a0e04;
+  --ok: #3fb950; --warn: #f0b44c; --danger: #ffb4a8; --warn-bg: #453817;
+  --space: 1.2rem; --radius: .4rem; --control-pad: .35rem .6rem;
+  color-scheme: dark;
+  font: 16px/1.5 system-ui, sans-serif; color: var(--text); background: var(--bg);
+}
+:root[data-theme="light"] {
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eef1f4; --sunken: #f3f5f7;
+  --border: #d3d9e0; --border-strong: #9aa6b2;
+  --text: #1b232c; --muted: #56616d; --link: #0b5cad;
+  --accent: #c2550f; --accent-text: #ffffff;
+  --ok: #1a7f37; --warn: #9a6700; --danger: #b42318; --warn-bg: #fff4d6;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]), :root[data-theme="system"] {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eef1f4; --sunken: #f3f5f7;
+    --border: #d3d9e0; --border-strong: #9aa6b2;
+    --text: #1b232c; --muted: #56616d; --link: #0b5cad;
+    --accent: #c2550f; --accent-text: #ffffff;
+    --ok: #1a7f37; --warn: #9a6700; --danger: #b42318; --warn-bg: #fff4d6;
+    color-scheme: light;
+  }
+}
+:root[data-density="compact"] { --space: .75rem; --control-pad: .2rem .5rem; font-size: 15px }
+
+body { margin: 0; background: var(--bg) }
+h1 { font-size: 1.6rem; margin: 0 }
+h2, label { font-size: 1rem; font-weight: 650; display: block }
+input, select, textarea, button {
+  font: inherit; color: inherit; border: 1px solid var(--border-strong);
+  background: var(--surface-2); border-radius: .3rem; padding: var(--control-pad)
+}
+select, input, textarea { box-sizing: border-box; width: 100%; margin: .4rem 0 }
+input[type="radio"], input[type="checkbox"] { width: auto; margin: 0 .4rem 0 0 }
+textarea { font: 1rem/1.5 ui-monospace, monospace; background: var(--sunken) }
+button, a, summary { cursor: pointer }
+button:disabled { cursor: default; opacity: .6 }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 650 }
+a { color: var(--link) }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px }
+.muted { color: var(--muted) }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap
+}

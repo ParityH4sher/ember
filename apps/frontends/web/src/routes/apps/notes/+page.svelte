@@ -1,19 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { beforeNavigate, replaceState } from '$app/navigation';
-  import Account from '../../../lib/Account.svelte';
   import {
-    createChat, createProject, getChat, getSession, listAgents, listChats, listProjects, loadNotes, saveNote,
-    sendMessage, signInUrl, SignInRequired,
-    type Agent, type Chat, type ChatSummary, type Notes, type Project, type Session
+    createChat, createProject, getChat, listAgents, listChats, listProjects, loadNotes, saveNote,
+    sendMessage, SignInRequired,
+    type Agent, type Chat, type ChatSummary, type Notes, type Project
   } from '../../../lib/api';
   import { blocks } from '../../../lib/links';
+  import { setLeaveGuard } from '../../../lib/session.svelte';
 
   let projects = $state<Project[]>([]), project = $state(''), path = $state('');
   let notes = $state.raw<Notes>(Object.create(null));
   let editing = $state(false), busy = $state(false), offline = $state(false);
   let draft = $state(''), filter = $state(''), message = $state(''), retry = $state(false);
-  let session = $state.raw<Session | null>(null), signedOut = $state(false);
+  // The layout signs people in first; this turns true when the session ends while
+  // the page is open (the shell then offers to sign in again) and stops polling.
+  let signedOut = $state(false);
   let dirty = $derived(editing && draft !== (notes[path] ?? ''));
   let paths = $derived(Object.keys(notes).sort());
   let references = $derived(paths.filter(p => p !== path &&
@@ -36,22 +38,18 @@
     try { await fn(); } catch (error) {
       if (error instanceof SignInRequired) {
         signedOut = true; retry = false; message = '';
-        session = { enabled: true, authenticated: false };
       }
       else message = error instanceof Error ? error.message : String(error);
     }
     finally { busy = false; }
   }
-  // Sign-in and sign-out are full-page navigations through the API. Once the
-  // visitor agrees to discard a draft, close the editor so that leaving does
-  // not ask again.
+  // Sign-in and sign-out are full-page navigations through the API; the user
+  // menu asks this guard first. Once the visitor agrees to discard a draft,
+  // close the editor so that leaving does not ask again.
   function confirmLeave() {
     if (!leave()) return false;
     editing = false;
     return true;
-  }
-  function signIn() {
-    if (confirmLeave()) location.assign(signInUrl(location.pathname + location.search));
   }
   // Covers links to other pages of the app, back/forward, and unloading the
   // page; for an unload the browser asks with its own dialog.
@@ -122,9 +120,6 @@
   async function load() {
     try {
       retry = false;
-      session = await getSession();
-      signedOut = Boolean(session?.enabled && !session.authenticated);
-      if (signedOut) return;
       projects = (await listProjects()).projects;
       await loadAgents();
       if (!projects.length) { message = 'Create a project to start your linked notes.'; return; }
@@ -199,8 +194,10 @@
     network();
     window.addEventListener('online', network);
     window.addEventListener('offline', network);
+    setLeaveGuard(confirmLeave);
     action(load);
     return () => {
+      setLeaveGuard(null);
       window.removeEventListener('online', network);
       window.removeEventListener('offline', network);
     };
@@ -211,9 +208,8 @@
 {#snippet link(label: string, dest: string)}
   <a href={query(dest)} onclick={(e) => follow(e, dest)}>{label}</a>
 {/snippet}
-<header><a href="/">Ember</a> / Project notes <Account {session} {confirmLeave} /></header>
 {#if offline}<p id="offline" role="status">Offline. Browse notes already loaded in this window. Reconnect to load projects or save edits.</p>{/if}
-<main inert={busy}>
+<div class="notes" inert={busy}>
   <aside>
     <label for="project">Project</label>
     <select id="project" value={project} onchange={e => {
@@ -251,9 +247,6 @@
   </aside>
   <section class="page">
     <p id="message" role="status">{message}</p>
-    {#if signedOut}
-      <p id="signed-out">You are signed out. <button id="sign-in" onclick={signIn}>Sign in</button></p>
-    {/if}
     {#if retry}<button id="retry" onclick={() => action(load)}>Retry connection</button>{/if}
     {#if project && chat}
       <div class="toolbar">
@@ -301,32 +294,32 @@
       </nav>
     {/if}
   </section>
-</main>
+</div>
 
 <style>
-  aside,.page {padding:1.2rem}
-  #offline {margin:0;padding:.6rem 1.2rem;background:#453817}
-  .toolbar,aside {background:#192129;border-bottom:1px solid #34404c}
-  main {display:grid;grid-template-columns:minmax(14rem,22rem) 1fr;max-width:80rem;margin:auto}
+  aside {padding:var(--space)}
+  #offline {margin:0 0 var(--space);padding:.6rem 1.2rem;background:var(--warn-bg);border-radius:var(--radius)}
+  .toolbar,aside {background:var(--surface);border:1px solid var(--border)}
+  .notes {display:grid;grid-template-columns:minmax(14rem,20rem) 1fr;gap:var(--space)}
   aside {align-self:start;border-radius:.4rem}
   textarea {height:55vh}
   nav a {display:block;overflow-wrap:anywhere;padding:.15rem 0}
-  .toolbar {display:flex;align-items:center;gap:.5rem;padding:.5rem}
+  .toolbar {display:flex;align-items:center;gap:.5rem;padding:.5rem;border-radius:var(--radius)}
   .toolbar strong {margin-right:auto;overflow-wrap:anywhere}
   .page {min-width:0}
   article {min-height:10rem;white-space:pre-wrap;overflow-wrap:anywhere}
-  article :global(pre) {overflow:auto;background:#202b36;padding:.5rem}
+  article :global(pre) {overflow:auto;background:var(--surface-2);padding:.5rem}
   #message:empty {display:none}
-  @media(max-width:42rem){main{grid-template-columns:1fr}}
+  @media(max-width:62rem){.notes{grid-template-columns:1fr}}
   /* Project chat */
-  .hint,.toolbar .agent,.working,.msg .who {color:#9fb0c0}
+  .hint,.toolbar .agent,.working,.msg .who {color:var(--muted)}
   nav a[aria-current] {font-weight:650}
   #transcript {list-style:none;padding:0;margin:1rem 0;display:flex;flex-direction:column;gap:.6rem}
-  .msg {padding:.5rem .7rem;border-radius:.4rem;background:#192129;border:1px solid #34404c;max-width:52rem}
-  .msg.user {background:#1d2c3b;align-self:flex-end}
+  .msg {padding:.5rem .7rem;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);max-width:52rem}
+  .msg.user {background:var(--surface-2);align-self:flex-end}
   .msg .who {display:block;font-size:.8rem;font-weight:650}
   .msg p {margin:.2rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
-  .msg .error {color:#ffb4a8}
+  .msg .error {color:var(--danger)}
   .working {font-style:italic}
   #composer {display:flex;flex-direction:column;align-items:flex-end}
   #chat-input {height:6rem}

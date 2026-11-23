@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -18,6 +19,9 @@ type Options struct {
 	Client *http.Client
 	Now    func() time.Time
 	Logger *slog.Logger
+	// Redis, when set, keeps sessions in Redis instead of process memory.
+	// It is ignored while sign-in is disabled.
+	Redis *RedisConfig
 }
 
 // Authenticator serves the /v1/auth routes and guards the rest of the API.
@@ -25,7 +29,8 @@ type Options struct {
 type Authenticator struct {
 	cfg      *Config
 	provider *provider
-	store    *store
+	store    sessionStore
+	redis    *redisClient
 	now      func() time.Time
 	logger   *slog.Logger
 
@@ -56,7 +61,12 @@ func New(cfg *Config, opts Options) *Authenticator {
 		opts.Logger.Warn("sign-in has no adminGroups: signed-in users cannot configure or activate plugins")
 	}
 	a.provider = &provider{cfg: cfg, client: opts.Client, now: opts.Now, logger: opts.Logger}
-	a.store = newStore(opts.Now)
+	if opts.Redis != nil {
+		a.redis = newRedisClient(opts.Redis.Addr, opts.Redis.password)
+		a.store = &redisStore{client: a.redis, now: opts.Now, logger: opts.Logger}
+	} else {
+		a.store = newMemoryStore(opts.Now)
+	}
 	// The __Host- prefix pins cookies to this exact origin; browsers require Secure for it.
 	prefix := ""
 	if cfg.secure {
@@ -72,6 +82,34 @@ func (a *Authenticator) Mode() string {
 		return "none"
 	}
 	return "oidc"
+}
+
+// SessionStore names where sessions are kept, for startup logs.
+func (a *Authenticator) SessionStore() string {
+	switch {
+	case a.cfg == nil:
+		return "none"
+	case a.redis != nil:
+		return "redis"
+	}
+	return "memory"
+}
+
+// CheckSessionStore reports whether the session store answers. The memory
+// store always does. The API starts even when Redis does not answer: signed-in
+// access then fails closed until it does.
+func (a *Authenticator) CheckSessionStore(ctx context.Context) error {
+	if a.redis == nil {
+		return nil
+	}
+	return a.redis.ping(ctx)
+}
+
+// Close releases idle connections to the session store.
+func (a *Authenticator) Close() {
+	if a.redis != nil {
+		a.redis.close()
+	}
 }
 
 // Wrap serves the auth routes and, when sign-in is configured, requires a
@@ -104,7 +142,11 @@ func (a *Authenticator) require(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "cross_origin_request", "cross-origin writes are not allowed")
 			return
 		}
-		s, ok := a.current(w, r)
+		s, ok, err := a.current(w, r)
+		if err != nil {
+			a.storeUnavailable(w, err)
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "sign in to use Ember")
 			return
@@ -146,17 +188,36 @@ func (a *Authenticator) sameOrigin(r *http.Request) bool {
 	return origin == "" || origin == a.cfg.origin
 }
 
-func (a *Authenticator) current(w http.ResponseWriter, r *http.Request) (session, bool) {
+// current returns the caller's session. A store error is neither signed in nor
+// signed out: the cookie is kept, and the caller must answer 503.
+func (a *Authenticator) current(w http.ResponseWriter, r *http.Request) (session, bool, error) {
 	c, err := r.Cookie(a.sessionCookie)
 	if err != nil {
-		return session{}, false
+		return session{}, false, nil
 	}
-	s, ok := a.store.session(c.Value)
+	s, ok, err := a.store.session(r.Context(), c.Value)
+	if err != nil {
+		return session{}, false, err
+	}
 	if !ok {
-		// Expired, signed out, or lost when the API restarted.
+		// Expired, signed out, or lost when an API without Redis restarted.
 		http.SetCookie(w, a.cookie(a.sessionCookie, "", -1))
 	}
-	return s, ok
+	return s, ok, nil
+}
+
+// storeUnavailable answers when the session store fails. Like an identity
+// provider outage, it pauses sign-in and signed-in access (fail closed).
+func (a *Authenticator) storeUnavailable(w http.ResponseWriter, err error) {
+	a.logger.Warn("session store unavailable", "error", err)
+	writeError(w, http.StatusServiceUnavailable, "session_store_unavailable",
+		"the session store is unavailable; sign-in is paused until it returns")
+}
+
+// providerInfo tells the web app which identity provider it signs in with.
+type providerInfo struct {
+	Name       string `json:"name,omitempty"`
+	AccountURL string `json:"accountUrl,omitempty"`
 }
 
 func (a *Authenticator) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -165,18 +226,21 @@ func (a *Authenticator) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "authenticated": false})
 		return
 	}
-	s, ok := a.current(w, r)
-	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "authenticated": false})
+	s, ok, err := a.current(w, r)
+	if err != nil {
+		a.storeUnavailable(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":       true,
-		"authenticated": true,
-		"user":          s.user,
-		"role":          s.role.String(),
-		"expiresAt":     s.expires.UTC().Format(time.RFC3339),
-	})
+	body := map[string]any{"enabled": true, "authenticated": ok}
+	if a.cfg.ProviderName != "" || a.cfg.AccountURL != "" {
+		body["provider"] = providerInfo{Name: a.cfg.ProviderName, AccountURL: a.cfg.AccountURL}
+	}
+	if ok {
+		body["user"] = s.user
+		body["role"] = s.role.String()
+		body["expiresAt"] = s.expires.UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (a *Authenticator) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -199,12 +263,15 @@ func (a *Authenticator) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, nonce, verifier := randomToken(), randomToken(), randomToken()
-	a.store.addPending(state, pending{
+	if err := a.store.addPending(ctx, state, pending{
 		nonce:    nonce,
 		verifier: verifier,
 		returnTo: safeReturnTo(r.URL.Query().Get("returnTo")),
 		expires:  a.now().Add(pendingTTL),
-	})
+	}); err != nil {
+		a.storeUnavailable(w, err)
+		return
+	}
 	http.SetCookie(w, a.cookie(a.loginCookie, state, int(pendingTTL.Seconds())))
 
 	target, err := url.Parse(m.AuthorizationEndpoint)
@@ -240,7 +307,11 @@ func (a *Authenticator) handleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_login_state", "sign-in expired or was started elsewhere; start again")
 		return
 	}
-	attempt, ok := a.store.takePending(state)
+	attempt, ok, err := a.store.takePending(r.Context(), state)
+	if err != nil {
+		a.storeUnavailable(w, err)
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_login_state", "sign-in expired or was started elsewhere; start again")
 		return
@@ -285,11 +356,19 @@ func (a *Authenticator) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Never reuse a session ID across sign-ins (session fixation).
 	if old, err := r.Cookie(a.sessionCookie); err == nil {
-		a.store.removeSession(old.Value)
+		if _, _, err := a.store.removeSession(ctx, old.Value); err != nil {
+			a.storeUnavailable(w, err)
+			return
+		}
 	}
 	id := randomToken()
-	if !a.store.addSession(id, session{user: user, role: role, idToken: rawIDToken, expires: a.now().Add(a.cfg.sessionTTL)}) {
+	err = a.store.addSession(ctx, id, session{user: user, role: role, idToken: rawIDToken, expires: a.now().Add(a.cfg.sessionTTL)})
+	if errors.Is(err, errTooManySessions) {
 		writeError(w, http.StatusServiceUnavailable, "too_many_sessions", "too many active sessions; try again later")
+		return
+	}
+	if err != nil {
+		a.storeUnavailable(w, err)
 		return
 	}
 	http.SetCookie(w, a.cookie(a.sessionCookie, id, int(a.cfg.sessionTTL.Seconds())))
@@ -309,7 +388,13 @@ func (a *Authenticator) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	result := map[string]string{}
 	if c, err := r.Cookie(a.sessionCookie); err == nil {
-		if s, ok := a.store.removeSession(c.Value); ok {
+		s, ok, err := a.store.removeSession(r.Context(), c.Value)
+		if err != nil {
+			// Keep the cookie: the session still exists, so let the person retry.
+			a.storeUnavailable(w, err)
+			return
+		}
+		if ok {
 			a.logger.Info("user signed out", "subject", s.user.Subject)
 			if m := a.provider.cachedMetadata(); m != nil && m.EndSessionEndpoint != "" {
 				if target := a.endSessionURL(m.EndSessionEndpoint, s.idToken); target != "" {

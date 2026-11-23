@@ -41,7 +41,17 @@ ember_oidc_allowed_groups: []
 # means nobody can configure or activate plugins while sign-in is on.
 ember_oidc_admin_groups: []
 ember_oidc_session_ttl: 8h
+# Shown by the web app: the sign-in button names the provider, and the account
+# page links to where people manage their own account there. Empty leaves
+# them out of auth.json.
+ember_oidc_provider_name: ""
+ember_oidc_account_url: ""
 # Supply the client secret from Vault when Authentik runs elsewhere. Otherwise
 # it is read from the Authentik stack on this host, which generates it.
 ember_oidc_client_secret: ""
 ember_oidc_client_secret_source: /opt/stacks/authentik/secrets/ember_oidc_client_secret
+
+# With sign-in on, sessions are kept in a Redis container
+# (deploy/compose.redis.yaml, ADR 014). Its password is generated on the host
+# once; supply one from Vault only to set it yourself (letters, digits, - and _).
+ember_redis_password: ""

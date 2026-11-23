@@ -71,7 +71,7 @@ plugin from the list above.
 | Registration | `NewHandler` in `apps/api/internal/httpapi/server.go` |
 | Tests against a local upstream fixture | `apps/api/internal/httpapi/weather_test.go` |
 | Generic plugin routes | `contracts/openapi.yaml` (`/v1/plugins/...`) |
-| Browser UI | The home page at `/` (`apps/frontends/web/src/lib/PluginCard.svelte` and `SchemaFields.svelte`) renders configuration, activation, and operation forms from the plugin's schemas |
+| Browser UI | The plugins page at `/plugins/` (`apps/frontends/web/src/lib/PluginCard.svelte` and `SchemaFields.svelte`) renders configuration, activation, and operation forms from the plugin's schemas |
 
 What it does:
 

@@ -80,7 +80,7 @@
 {/key}
 
 <style>
-  article { border-top: 1px solid #34404c; padding: 1rem 0 }
+  article { border-top: 1px solid var(--border); padding: 1rem 0 }
   h3 { margin: 0 0 .4rem }
   details { margin: .8rem 0 }
   summary { cursor: pointer }

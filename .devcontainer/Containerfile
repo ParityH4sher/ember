@@ -15,6 +15,22 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Browsers for Playwright: the web app's test suites (apps/frontends/web,
+# npm run test:ui / test:real) and the Playwright and Chrome DevTools MCP
+# tools Claude Code uses. Keep PLAYWRIGHT_VERSION equal to @playwright/test in
+# apps/frontends/web/package.json, so the bundled Chromium build matches.
+# install-deps adds the system libraries; Google Chrome (the MCP tools'
+# default browser at /opt/google/chrome) is published for amd64 only.
+ARG PLAYWRIGHT_VERSION=1.64.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chrome; \
+    fi \
+    && chown -R node:node /ms-playwright \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
+
 USER node
 # The npm global prefix is owned by node, so Claude Code's updater can replace
 # it without root. ~/.claude is the mount point of the config volume and must

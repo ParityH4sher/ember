@@ -72,3 +72,12 @@ ember_oidc_allowed_groups: []
 # Members get Ember's `admin` role: they can also configure and activate
 # plugins. Create this group in Authentik (Directory > Groups) and add yourself.
 ember_oidc_admin_groups: [ember-admins]
+# Shown by the web app: "Sign in with Authentik", and a link to Authentik's
+# user interface, where people change their password and MFA devices.
+ember_oidc_provider_name: Authentik
+ember_oidc_account_url: "https://{{ authentik_public_host }}/if/user/"
+# Test-only Authentik accounts for the browser suite against this deployment
+# (apps/frontends/web/tests/real): ember-e2e-user and ember-e2e-admin, with
+# the password in the Authentik stack's secrets/ember_e2e_password. Keep off
+# on an instance with real users' data.
+ember_e2e_users: false

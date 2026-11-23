@@ -1,0 +1,50 @@
+{#- Test accounts for Ember's browser tests against real infrastructure
+    (apps/frontends/web/tests/real). Off by default: it renders to nothing, and
+    the stack role then removes the rendered file, unless the inventory sets
+    ember_e2e_users: true. Both accounts share one generated password, read
+    from the ember_e2e_password secret (secrets/ember_e2e_password on the host).
+    Do not enable this on an instance with real users' data. -#}
+{%- if (ember_oidc_enabled | default(false) | bool) and (ember_e2e_users | default(false) | bool) -%}
+# Managed by Ansible (ember_e2e_users); local edits are overwritten.
+version: 1
+metadata:
+  name: Ember browser test accounts
+  labels:
+    blueprints.goauthentik.io/description: Test-only users for Ember's Playwright suite
+entries:
+{% for group in (ember_oidc_admin_groups | default([]))[:1] + (ember_oidc_allowed_groups | default([]))[:1] %}
+  - model: authentik_core.group
+    id: group-{{ loop.index }}
+    identifiers:
+      name: {{ group | to_json }}
+    state: created
+{% endfor %}
+  - model: authentik_core.user
+    identifiers:
+      username: ember-e2e-user
+    attrs:
+      name: Ember E2E User
+      email: ember-e2e-user@example.invalid
+      path: users/ember-e2e
+      type: internal
+      is_active: true
+      password: !File /run/secrets/ember_e2e_password
+{% if ember_oidc_allowed_groups | default([]) %}
+      groups:
+        - !Find [authentik_core.group, [name, {{ ember_oidc_allowed_groups[0] | to_json }}]]
+{% endif %}
+{% if ember_oidc_admin_groups | default([]) %}
+  - model: authentik_core.user
+    identifiers:
+      username: ember-e2e-admin
+    attrs:
+      name: Ember E2E Admin
+      email: ember-e2e-admin@example.invalid
+      path: users/ember-e2e
+      type: internal
+      is_active: true
+      password: !File /run/secrets/ember_e2e_password
+      groups:
+        - !Find [authentik_core.group, [name, {{ ember_oidc_admin_groups[0] | to_json }}]]
+{% endif %}
+{%- endif %}

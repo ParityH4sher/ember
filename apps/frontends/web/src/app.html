@@ -7,6 +7,14 @@
     <link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest">
     <link rel="icon" href="%sveltekit.assets%/icons/notes.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="%sveltekit.assets%/icons/notes-192.png">
+    <script>
+      // Apply stored display preferences before first paint (see lib/prefs.svelte.ts).
+      try {
+        const p = JSON.parse(localStorage.getItem('ember:prefs') || '{}');
+        if (['light', 'dark', 'system'].includes(p.theme)) document.documentElement.dataset.theme = p.theme;
+        if (p.density === 'compact') document.documentElement.dataset.density = 'compact';
+      } catch {}
+    </script>
     %sveltekit.head%
   </head>
   <body><div style="display: contents">%sveltekit.body%</div></body>

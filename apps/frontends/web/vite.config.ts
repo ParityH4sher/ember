@@ -4,7 +4,8 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [sveltekit({
-    adapter: adapter(),
+    // 404.html renders the app's error page for unknown paths (see nginx.conf).
+    adapter: adapter({ fallback: '404.html' }),
     // The app owns the site root; Notes is the /apps/notes/ route.
     paths: { relative: false },
     prerender: { crawl: false }

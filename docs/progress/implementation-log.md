@@ -628,3 +628,129 @@ Verification (Fedora 45 x86_64, rootless Podman 6.2.0, Claude Code 2.1.323):
 
 Not run: a devcontainer rebuild with the Dev Container CLI, and messaging
 between two live sessions.
+
+## Web app shell (2026-11-23)
+
+**Request:** a sign-in page with a single Authentik button, and a real
+application with dashboard, settings, admin, and profile/account pages.
+**Plan:** [web app shell](../planning/web-app-shell.md).
+
+**Change (frontend only; no API change):**
+
+- `/login/` with one **Sign in with Authentik** button. The root layout loads
+  the session once and sends signed-out visitors there with a same-origin
+  `returnTo`.
+- An app shell (sidebar, top bar, user menu, mobile drawer) around every other
+  page. New pages: dashboard (`/`), `/plugins/`, `/settings/`, `/account/`,
+  `/admin/`. Project notes moved into the shell unchanged in behavior.
+- Refactor: `lib/session.svelte.ts` replaces the per-page `getSession()` calls
+  and `Account.svelte` (removed). The home page's plugin UI moved to
+  `/plugins/`, and service links to `ServiceLinks.svelte`. Colours became
+  tokens with a light theme; theme and density are per-browser preferences.
+- Gateway: `/login`, `/plugins`, `/settings`, `/account` and `/admin` redirect
+  to their trailing-slash paths, like `/apps/notes`.
+
+Verification (devcontainer, Node 24, Go API built from this tree in local mode):
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | 0 errors, 0 warnings in 302 files. |
+| `npm run build` | Prerendered `index.html` for all seven pages. |
+| `curl` each page on the Vite dev server with the API behind `/api` | 200 for each page; `/api/healthz`, `/api/v1/plugins` and `/api/v1/services` answered through the proxy. |
+| `vite preview` of the build | `/login/` serves "Sign in · Ember"; the pre-paint preference script is in every page. |
+
+Not run: no browser could start (Chromium's system libraries are missing and
+installing them needed root), so nothing was clicked, including sign-in
+against Authentik, the redirect to `/login/`, the user menu, the theme
+switch, the mobile drawer and the leave guard on sign-out. The gateway
+redirect was not exercised (no nginx in the devcontainer).
+
+## Provider name and Redis session store (2026-11-23)
+
+**Request:** tell the web app which identity provider it signs in with, and
+"let's add a redis" so sign-in sessions survive API restarts.
+**Decision:** [ADR 014](../decisions/014-redis-session-store.md).
+
+**Change:**
+
+- `auth.json` accepts `providerName` (at most 64 printable characters, trimmed)
+  and `accountUrl` (https, or http on loopback). `GET /v1/auth/session` reports
+  them as `provider: {name, accountUrl}` when sign-in is on, for signed-out
+  callers too. The Ansible role writes `Authentik` and
+  `https://auth.<ingress_domain>/if/user/` for the homelab.
+- The auth package has a session-store interface. Memory stays the default;
+  `EMBER_REDIS_ADDR` and `EMBER_REDIS_PASSWORD_FILE` select Redis through a
+  hand-written RESP2 client (`internal/auth/redis.go`, no new module). Keys are
+  SHA-256 hashes of the cookie or state. Store errors give
+  `503 session_store_unavailable` and never sign anyone in or out. Redis
+  without sign-in, or a password file without an address, stops startup.
+- `deploy/compose.redis.yaml`: `redis:8.12.0-alpine` pinned by index digest,
+  on an internal network with the API only, AOF in `redis-data`, `maxmemory`
+  96 MB with `volatile-ttl`, read-only root, no capabilities, password via a
+  tmpfs config file. `install.sh` adds it with the OIDC overlay and generates
+  the password file; the Ansible role does the same. The bundle and the
+  bundle smoke test include the overlay.
+
+Verification (devcontainer, Go 1.27.4):
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l .`, `go vet ./...`, `go test -race ./...` in `apps/api` | Clean; all packages pass. New tests run the client and the sign-in flow against a fake RESP server: set/get/expiry/GETDEL/DEL, error and oversized replies, wrong password, reconnect after a dropped connection, refused connection, outage → 503 without cookie changes, recovery, sessions shared by a second `Authenticator`, hashed keys. |
+| `GOOS=linux GOARCH=arm64 go build` | Builds. |
+| Anonymous registry API for `library/redis:8.12.0-alpine` | Index digest `sha256:ff55e252…b289` lists amd64, arm64, arm/v6, arm/v7, 386, ppc64le and s390x. Image user `redis` is 999:1000, and `/data` is owned by 999:1000. |
+| The Redis start script, with `$$` unescaped and `exec` replaced by `echo`, under `sh` | Valid password → `requirepass` file with mode 0600; empty, spaced, `$`-containing and CRLF passwords refused. |
+| `install.sh` with stub `docker`/`podman` commands | Docker as non-root: generates a 64-hex-digit `0440` file and asks for `sudo chown`. Podman: `podman unshare chown`, then installs; a second run keeps the file. Relative path refused. |
+| `ansible-playbook --syntax-check` (both inventories), `ansible-lint roles/ember` | Pass, 0 failures. |
+
+Not run: Compose (no Docker or Podman here, and downloading the Compose binary
+or running Redis from the image was not permitted), so the overlay merge, the
+healthcheck, `group_add` reading the `0440` password file, the named volume's
+ownership, AOF on a read-only root, and the bundle smoke test's new check are
+unverified. The client never ran against a real Redis or Valkey server.
+Nothing ran on the Pi or against the homelab Authentik.
+
+## Web app: session handling, error page, provider name, Playwright (2026-11-23)
+
+**Request:** finish the web app's loose ends, show the identity provider's
+name, add Redis (the API side is the entry above), add Playwright tests
+including tests against real infrastructure, and Playwright with browsers in
+the devcontainer. Plan: [web app shell](../planning/web-app-shell.md), phases W7–W11.
+
+**Change:**
+
+- `api.ts` reports every `401` to the session store. A page whose session
+  ends stays mounted and the shell shows **Sign in again** (Project notes
+  keeps its draft on screen). A `503` from `GET /v1/auth/session` (Redis or
+  the provider down) shows a retry page; the cookie is kept.
+- `+error.svelte` and a `404.html` fallback, served with status 404 by a new
+  `nginx.conf` in the web image. The installed app now opens on `/`.
+- Sign-in button, account and admin pages use `provider.name`; the account
+  page links to `provider.accountUrl` when it is an http(s) URL.
+- The account menu's accessible name now contains its visible text (axe
+  `label-content-name-mismatch`, WCAG 2.5.3).
+- Playwright 1.64.1: `tests/ui` (mocked API, 42 tests, desktop and Pixel 7,
+  axe on every page in both themes; CI job `web`) and `tests/real` (13 tests
+  against a deployment, signing in through Authentik). Runner
+  `scripts/test-real.sh` uses the official Playwright image. Authentik
+  blueprint `ember-e2e.yaml.j2` creates two test accounts when
+  `ember_e2e_users: true`.
+- Devcontainer: Chromium and its libraries (and Google Chrome on amd64, for
+  the MCP browser tools), the Playwright VS Code extension, `--shm-size=1g`.
+
+Verification (devcontainer, Node 24; Chromium's libraries were loaded from
+Debian bookworm packages in a scratch directory via `LD_LIBRARY_PATH`, because
+the image did not have them yet):
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | 0 errors, 0 warnings. |
+| `npm run test:ui --repeat-each 3` | 126 passed. The first run found the menu's label mismatch and test mistakes, fixed above. |
+| `npm run test:real` without `EMBER_E2E_BASE_URL` | 13 listed, 13 skipped. |
+| Screenshots of login, dashboard, admin, account, notes (dark, light, 390 px) | Reviewed; stat tiles now fit two per row on phones. |
+| `go vet`, `go test -race ./...` in `apps/api` | Pass. |
+
+Not run: the real-infrastructure suite against a deployment (no Ember with
+Authentik is reachable from here), the `ember-e2e` blueprint in Authentik
+(the `password` attribute and group lookup are untested), the devcontainer
+image rebuild, `scripts/test-real.sh` (no Podman or Docker here), the `web`
+CI job on GitHub, and the web image's `nginx.conf` in a container.

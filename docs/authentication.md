@@ -27,7 +27,8 @@ The Ember API is the OAuth 2.0 client. The browser never handles tokens.
    and authorized party, expiry, issue time, and nonce. It then uses the
    user's groups to decide whether they may sign in and with which
    [role](#roles).
-3. Ember stores the session in memory and sets an opaque `HttpOnly`,
+3. Ember stores the session on the server (in memory, or in
+   [Redis](#session-store) when configured) and sets an opaque `HttpOnly`,
    `SameSite=Lax` cookie. Over HTTPS the cookie is also `Secure` and uses the
    `__Host-` prefix. Access and refresh tokens are discarded.
 
@@ -42,16 +43,26 @@ With sign-in configured, behavior changes as follows:
 - If the provider stops answering its discovery document, new sign-ins and
   signed-in access pause with `503` until it returns, as DEC-002 requires.
   Ember checks the provider at most every 30 seconds. `/healthz` stays up.
-- Sessions last `sessionTtl` and are not renewed. Restarting the API signs
-  everyone out.
+- Sessions last `sessionTtl` and are not renewed. Without Redis, restarting
+  the API signs everyone out. With [Redis](#session-store), sessions survive
+  API restarts.
+- If the session store (Redis) does not answer, sign-in and signed-in access
+  pause with `503 session_store_unavailable` until it returns. Ember neither
+  signs anyone in nor clears their cookie meanwhile. `/healthz` stays up.
 - **Sign out** removes the Ember session. If the provider advertises an
   `end_session_endpoint`, the browser is then sent there, and the provider
   decides what happens next (see `postLogoutRedirectUrl`). Authentik without
   `postLogoutRedirectUrl` shows its "You've logged out of Ember" page, which
   offers to return to Ember or to sign out of Authentik too.
 
-The home page (`/`) and Project notes (`/apps/notes/`) show **Sign in** and
-**Sign out** controls when sign-in is enabled.
+In the web app, signed-out visitors are sent to `/login/`, which has a single
+**Sign in with <providerName>** button and returns them to the page they asked
+for. If the session ends while a page is open, the page stays and offers
+**Sign in again**; while the session store or provider answers `503`, the app
+shows a retry page instead of signing anyone out.
+The user menu in the top bar offers **Sign out**, and **Profile & account**
+(`/account/`) shows the name, email, groups, role and session expiry that
+Ember received. The web app has no other sign-in method.
 
 ## Roles
 
@@ -78,12 +89,13 @@ admin group cannot sign in.
 - Without `adminGroups`, nobody is an admin: no one can configure or activate
   plugins, and the API logs a warning at startup.
 - The role is fixed for the whole session. A group change at the provider takes
-  effect at the person's next sign-in. To withdraw admin rights at once,
-  restart the API, which signs everyone out.
+  effect at the person's next sign-in. To withdraw admin rights at once, sign
+  everyone out: restart the API when sessions are in memory, or
+  [clear the session store](#session-store) when they are in Redis.
 - **With sign-in off there are no identities, so every caller is an admin.**
   This is one more reason to keep an API without sign-in on loopback.
-- The API enforces roles. The home page (`/`) only hides the plugin settings
-  and activation controls from users. `GET /api/v1/auth/session` reports the signed-in
+- The API enforces roles. The web app only hides the plugin settings
+  and activation controls and the Admin page from users. `GET /api/v1/auth/session` reports the signed-in
   person's `role`.
 
 ## Configuration
@@ -94,6 +106,8 @@ Two files configure sign-in. Their paths are passed in environment variables:
 | --- | --- |
 | `EMBER_AUTH_CONFIG_FILE` | JSON configuration (below). Unset means sign-in is disabled. |
 | `EMBER_OIDC_CLIENT_SECRET_FILE` | The client secret alone. A trailing newline is ignored. |
+| `EMBER_REDIS_ADDR` | Optional `host:port` of the [session store](#session-store). Unset keeps sessions in memory. |
+| `EMBER_REDIS_PASSWORD_FILE` | Optional Redis password alone, read like the client secret. Needs `EMBER_REDIS_ADDR`. |
 
 The client secret is kept out of the JSON file so that it can follow the
 secret-file rules in DEC-002: permission-restricted, mounted read-only into
@@ -107,7 +121,9 @@ the API only, and excluded from backups.
   "scopes": ["openid", "profile", "email"],
   "allowedGroups": ["ember-users"],
   "adminGroups": ["ember-admins"],
-  "sessionTtl": "8h"
+  "sessionTtl": "8h",
+  "providerName": "Authentik",
+  "accountUrl": "https://auth.example.com/if/user/"
 }
 ```
 
@@ -123,10 +139,51 @@ the API only, and excluded from backups.
 | `allowedGroups` | no | everyone | When set, only members of at least one listed group (or of an `adminGroups` group) may sign in. They get the `user` role. |
 | `adminGroups` | no | nobody | Members of at least one listed group get the `admin` role and may change plugins. See [Roles](#roles). |
 | `sessionTtl` | no | `8h` | A Go duration from `5m` to `720h`. |
+| `providerName` | no | | The provider's display name, such as `Authentik`, at most 64 printable characters. The web app shows it on the sign-in button. |
+| `accountUrl` | no | | Where people manage their own account at the provider, such as Authentik's `https://auth.example.com/if/user/`. The web app links to it. |
+
+`GET /api/v1/auth/session` reports `providerName` and `accountUrl` as
+`provider`, for signed-out callers too, so the sign-in page can use them. Each
+member is left out when it is not configured, and `provider` is left out when
+neither is:
+
+```json
+{"enabled": true, "authenticated": false,
+ "provider": {"name": "Authentik", "accountUrl": "https://auth.example.com/if/user/"}}
+```
 
 All URLs must use `https`. Plain `http` is accepted only for loopback hosts
 during development. The API refuses to start if the configuration is invalid
 and reports which field is wrong.
+
+## Session store
+
+By default the API keeps sessions and pending sign-in attempts in memory.
+Set `EMBER_REDIS_ADDR` to keep them in Redis instead
+([ADR 014](decisions/014-redis-session-store.md)). They then survive API
+restarts, and several API replicas could share them. Ember needs Redis 6.2 or
+newer, or Valkey; the Compose overlay runs Redis 8.
+
+- Keys are `ember:session:<SHA-256 of the cookie>` and
+  `ember:pending:<SHA-256 of the state>`, so the stored data cannot be replayed
+  as a cookie. Values are JSON (user, role, ID token, expiry). Redis expires
+  each key when the session or attempt ends.
+- The values include ID tokens. Protect the Redis volume like the client
+  secret, and do not back it up: sessions are disposable, and restoring an
+  empty store only means everyone signs in again.
+- If Redis does not answer, Ember answers `503 session_store_unavailable`
+  instead of signing people in or out, and the API keeps starting.
+- `EMBER_REDIS_ADDR` without sign-in is a startup error, because Redis would
+  be unused. So is `EMBER_REDIS_PASSWORD_FILE` without `EMBER_REDIS_ADDR`.
+- The connection is plain RESP over TCP, without TLS. Keep Redis on a private
+  network, as the Compose overlay does.
+
+To sign everyone out, delete the session keys. With Compose, for example:
+
+```sh
+docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml \
+  exec redis sh -c 'IFS= read -r REDISCLI_AUTH < /run/secrets/ember-redis-password; export REDISCLI_AUTH; redis-cli FLUSHALL'
+```
 
 ## Provider setup
 
@@ -150,27 +207,41 @@ browser uses, including its DNS name and TLS certificate.
 ## Running with Compose
 
 `deploy/compose.oidc.yaml` mounts both files read-only into the API container.
-`install.sh` adds it automatically when `EMBER_AUTH_CONFIG_FILE` is set. Use
-absolute host paths:
+`deploy/compose.redis.yaml` adds the Redis session store: a `redis` service on
+an internal network that only the API joins, with its data in the `redis-data`
+volume. `install.sh` adds both overlays automatically when
+`EMBER_AUTH_CONFIG_FILE` is set. Use absolute host paths:
 
 ```sh
 export EMBER_AUTH_CONFIG_FILE=/etc/ember/auth.json
 export EMBER_OIDC_CLIENT_SECRET_FILE=/etc/ember/secrets/oidc-client-secret
+# Optional; defaults to redis-password next to the client secret.
+export EMBER_REDIS_PASSWORD_FILE=/etc/ember/secrets/redis-password
 ./install.sh
 ```
 
-Without the installer, pass both Compose files:
-`docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml up -d`.
+When the Redis password file does not exist, `install.sh` generates it (64 hex
+digits) and gives it to UID 65532 with mode `0440`. As root, or with rootless
+Podman (`podman unshare`), this needs no help; otherwise the script prints the
+`sudo chown` command to run before running it again. To write the file
+yourself, use one line of letters, digits, `-` and `_`.
 
-The API runs as UID 65532, so both files must be readable by that user:
+Without the installer, pass all three Compose files:
+`docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml up -d`.
+With only the first two, sessions stay in API memory.
+
+The API runs as UID 65532, so the files must be readable by that user. Redis
+runs as UID 999 with the supplementary group 65532, so the Redis password file
+must also be group-readable (`0440`):
 
 - **Docker:** `sudo chown 65532:65532 <file> && sudo chmod 0400 <file>`.
 - **Rootless Podman:** `podman unshare chown 65532:65532 <file>`, then `chmod 0400 <file>`.
 - **SELinux hosts:** the files also need a container-readable label, for
   example `chcon -t container_file_t <file>`.
 
-Restart the stack after changing either file, because both are read once at
-startup.
+Restart the stack after changing any of these files, because they are read
+once at startup. After changing the Redis password, restart both `redis` and
+`api`.
 
 ## Running with Ansible and the Authentik stack
 
@@ -178,7 +249,9 @@ The Ansible deployment automates all of this. Set `ingress_domain` in the
 inventory, then run `playbooks/stacks.yml` followed by `playbooks/site.yml`:
 
 - Authentik registers Ember's client from a generated blueprint.
-- Ember gets a matching `auth.json`, client secret, and the overlay.
+- Ember gets a matching `auth.json` (with `providerName` `Authentik` and
+  `accountUrl` `https://auth.<ingress_domain>/if/user/`), the client secret, a
+  generated Redis password, and both overlays.
 
 Setting `ingress_domain` publishes `ember.<domain>` and `auth.<domain>` on the
 **public internet** through a Cloudflare Tunnel, and `stacks.yml` refuses to do
@@ -221,7 +294,15 @@ go run .
   yet.
 - There are two fixed roles. Finer permissions, such as per-plugin or
   per-operation grants, are not implemented.
-- Sessions and plugin configuration live in API memory.
+- Sessions live in API memory unless Redis is configured; the Compose and
+  Ansible deployments configure it whenever sign-in is on. Plugin
+  configuration always lives in API memory.
+- A session cannot be revoked by itself: signing out removes it, and clearing
+  the store removes all of them.
+- Redis is reached without TLS, and the client does not support Redis Cluster
+  or Sentinel. Under Redis `maxmemory` pressure, `volatile-ttl` evicts the
+  entries closest to expiry first, which can sign out people whose sessions
+  were about to end anyway.
 - Sign-in covers people only. Workload credentials from DEC-002 are separate
   and not implemented.
 - Requests refused before routing appear in the access log with the route `/`.

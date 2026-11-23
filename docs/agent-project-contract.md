@@ -108,7 +108,7 @@ When exchanging a project with notes, use the
 [portable manifest contract](pathname:///project-schema/README.md). List notes as
 Markdown source files with project-relative paths; backlinks can be rebuilt.
 
-Open **Project notes** on the Ember home page (`/apps/notes/`). **Create project**
+Open **Project notes** from Ember's sidebar (`/apps/notes/`). **Create project**
 creates `notes/index.md` and `notes/handoff.md` and opens the index automatically.
 Browse or filter the note list, edit Markdown and save, follow a link, or use
 **Backlinks** to see which notes refer to the open one. A link to a missing note

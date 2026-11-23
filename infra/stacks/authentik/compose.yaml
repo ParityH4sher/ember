@@ -16,6 +16,8 @@ x-ember-stack:
     - authentik_postgres_password
     # Shared with Ember's API, which reads it from this file (roles/ember).
     - ember_oidc_client_secret
+    # Password of the optional browser-test accounts (ember-e2e.yaml.j2).
+    - ember_e2e_password
 
 # Settings shared by server and worker. Keep secrets and volumes out of it:
 # each service lists its own, because overriding a merged key makes Ansible's
@@ -86,8 +88,8 @@ services:
       traefik.http.services.authentik.loadbalancer.server.port: "9000"
 
   # The worker applies blueprints. ./blueprints holds the rendered Ember client
-  # (templates/blueprints/ember.yaml.j2); the blueprint reads the client secret
-  # with !File.
+  # (templates/blueprints/ember.yaml.j2) and, when enabled, the browser-test
+  # accounts (ember-e2e.yaml.j2); they read their secrets with !File.
   worker:
     <<: *authentik
     command: worker
@@ -95,6 +97,7 @@ services:
       - authentik_postgres_password
       - authentik_secret_key
       - ember_oidc_client_secret
+      - ember_e2e_password
     volumes:
       - data:/data
       - ./blueprints:/blueprints/custom:ro
@@ -117,3 +120,5 @@ secrets:
     file: ./secrets/authentik_postgres_password
   ember_oidc_client_secret:
     file: ./secrets/ember_oidc_client_secret
+  ember_e2e_password:
+    file: ./secrets/ember_e2e_password

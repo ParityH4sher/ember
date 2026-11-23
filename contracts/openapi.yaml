@@ -52,7 +52,10 @@ paths:
       summary: Report whether sign-in is enabled and who is signed in
       description: >-
         Always available, so browser clients can decide whether to offer
-        sign-in. A stale or unknown session cookie is cleared.
+        sign-in. A stale or unknown session cookie is cleared. With sign-in
+        enabled, `provider` names the identity provider for signed-out and
+        signed-in callers alike when the operator configured providerName or
+        accountUrl.
       security: []
       responses:
         "200":
@@ -69,13 +72,21 @@ paths:
               examples:
                 disabled:
                   value: {enabled: false, authenticated: false}
+                signedOut:
+                  value:
+                    enabled: true
+                    authenticated: false
+                    provider: {name: Authentik, accountUrl: "https://auth.example.com/if/user/"}
                 signedIn:
                   value:
                     enabled: true
                     authenticated: true
+                    provider: {name: Authentik, accountUrl: "https://auth.example.com/if/user/"}
                     user: {subject: 3f9c, name: Ada Lovelace, email: ada@example.com, groups: [makers]}
                     role: user
                     expiresAt: "2026-11-21T20:00:00Z"
+        "503":
+          $ref: "#/components/responses/SessionStoreUnavailable"
   /v1/auth/login:
     get:
       operationId: startLogin
@@ -184,6 +195,8 @@ paths:
           $ref: "#/components/responses/CrossOriginRequest"
         "404":
           $ref: "#/components/responses/AuthNotConfigured"
+        "503":
+          $ref: "#/components/responses/SessionStoreUnavailable"
   /v1/projects/{projectId}:
     delete:
       operationId: deleteProject
@@ -886,12 +899,27 @@ components:
             notAdmin:
               value: {code: insufficient_role, message: this action needs the Ember admin role}
     IdentityProviderUnavailable:
-      description: The identity provider is unreachable; sign-in and signed-in access are paused
+      description: >-
+        The identity provider or the session store (Redis) is unreachable;
+        sign-in and signed-in access are paused until it returns
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-          example: {code: identity_provider_unavailable, message: the sign-in service is unavailable}
+          examples:
+            identityProvider:
+              value: {code: identity_provider_unavailable, message: the sign-in service is unavailable}
+            sessionStore:
+              value: {code: session_store_unavailable, message: the session store is unavailable; sign-in is paused until it returns}
+    SessionStoreUnavailable:
+      description: >-
+        The session store (Redis) is unreachable. The session cookie is kept;
+        retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: {code: session_store_unavailable, message: the session store is unavailable; sign-in is paused until it returns}
     AuthNotConfigured:
       description: Sign-in is not configured on this instance
       content:
@@ -977,6 +1005,24 @@ components:
         expiresAt:
           type: string
           format: date-time
+        provider:
+          $ref: "#/components/schemas/AuthProvider"
+    AuthProvider:
+      type: object
+      additionalProperties: false
+      description: >-
+        The identity provider, present only when sign-in is enabled and the
+        operator set providerName or accountUrl. Each member is omitted when
+        not configured.
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: Display name, such as Authentik.
+        accountUrl:
+          type: string
+          format: uri
+          description: Where people manage their own account at the provider.
     LogoutResult:
       type: object
       additionalProperties: false

@@ -4,8 +4,11 @@ export interface Project { id: string; name: string }
 export type Notes = Record<string, string | undefined>;
 interface NoteEdit { path: string; content: string; previous: string | null }
 export interface User { subject: string; name?: string; email?: string; groups?: string[] }
+/** The identity provider, as the operator named it in the API's sign-in configuration. */
+export interface Provider { name?: string; accountUrl?: string }
 export interface Session {
-  enabled: boolean; authenticated: boolean; user?: User; role?: 'admin' | 'user'; expiresAt?: string
+  enabled: boolean; authenticated: boolean; user?: User; role?: 'admin' | 'user'; expiresAt?: string;
+  provider?: Provider
 }
 export interface Health { status: string; version: string }
 export interface ServiceLink { name: string; url: string }
@@ -37,6 +40,10 @@ export interface ChatSummary {
 /** The API requires an OpenID Connect session (HTTP 401). */
 export class SignInRequired extends Error {}
 
+// Told about every 401, so the app can react in one place (lib/session.svelte.ts).
+let signInRequired = () => {};
+export function onSignInRequired(handler: () => void): void { signInRequired = handler; }
+
 async function request(url: string, method = 'GET', data?: unknown,
   unreachable = 'Cannot reach Ember. Reconnect and try again.'): Promise<Response> {
   let response;
@@ -49,7 +56,10 @@ async function request(url: string, method = 'GET', data?: unknown,
   } catch {
     throw Error(unreachable);
   }
-  if (response.status === 401) throw new SignInRequired('Sign in to continue.');
+  if (response.status === 401) {
+    signInRequired();
+    throw new SignInRequired('Your session has ended. Sign in again to continue.');
+  }
   if (!response.ok) {
     const error: unknown = await response.json().catch(() => null);
     throw Error(error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
@@ -130,12 +140,19 @@ export async function sendMessage(id: string, chat: string, content: string): Pr
 
 /** Session state, or null when it cannot be read (offline or an older API). */
 export async function getSession(): Promise<Session | null> {
+  let response;
   try {
-    const response = await fetch('/api/v1/auth/session', { cache: 'no-store' });
-    return response.ok ? await response.json() : null;
+    response = await fetch('/api/v1/auth/session', { cache: 'no-store' });
   } catch {
     return null;
   }
+  // Sign-in is configured but its session store or identity provider is down.
+  if (response.status === 503) throw new SignInUnavailable();
+  return response.ok ? await response.json() : null;
+}
+/** Sign-in is configured but temporarily unavailable (HTTP 503). */
+export class SignInUnavailable extends Error {
+  constructor() { super('Sign-in is temporarily unavailable. Try again in a moment.'); }
 }
 /** Full-page navigation to the API, which redirects to the identity provider. */
 export function signInUrl(returnTo: string): string {
