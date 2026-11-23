@@ -546,6 +546,27 @@ func TestSignOut(t *testing.T) {
 	}
 }
 
+// Without postLogoutRedirectUrl the logout URL carries no
+// post_logout_redirect_uri, so Authentik shows its own sign-out page instead
+// of redirecting straight back.
+func TestSignOutWithoutPostLogoutRedirect(t *testing.T) {
+	idp := newFakeIdP(t)
+	cfg := testConfig(t, idp)
+	cfg.PostLogoutRedirectURL = ""
+	h := newTestHandler(t, idp, cfg)
+	session := signIn(t, h, idp)
+	rec := do(h, http.MethodPost, "/v1/auth/logout", []*http.Cookie{session}, map[string]string{"Sec-Fetch-Site": "same-origin"})
+	var body struct{ EndSessionURL string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	end, err := url.Parse(body.EndSessionURL)
+	if rec.Code != http.StatusOK || err != nil || !strings.HasPrefix(body.EndSessionURL, idp.srv.URL+"/logout?") ||
+		end.Query().Get("id_token_hint") == "" || end.Query().Has("post_logout_redirect_uri") {
+		t.Fatalf("status=%d endSessionUrl=%q", rec.Code, body.EndSessionURL)
+	}
+}
+
 func TestUnknownSessionCookieIsCleared(t *testing.T) {
 	idp := newFakeIdP(t)
 	h := newTestHandler(t, idp, testConfig(t, idp))

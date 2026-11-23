@@ -49,8 +49,8 @@ default service. Both sides are generated from the same inventory values
 
 - **Authentik side (`stacks.yml`):** renders `templates/blueprints/ember.yaml.j2`
   into a blueprint. It creates a confidential OAuth2 provider named *Ember*
-  (client ID `ember`, strict redirect and logout URIs, RS256 self-signed signing
-  key, claims included in the ID token) and an application with the slug
+  (client ID `ember`, a strict redirect URI, RS256 self-signed signing key,
+  claims included in the ID token) and an application with the slug
   `ember`. The client secret is the generated `secrets/ember_oidc_client_secret`,
   which the blueprint reads with `!File`. The issuer is therefore
   `https://auth.<ingress_domain>/application/o/ember/`.
@@ -72,6 +72,12 @@ Turning sign-in off removes the blueprint file, but Authentik keeps the provider
 and application it created. Delete them in the admin UI if you no longer want
 them. Everyone in Authentik may sign in to Ember unless you set
 `ember_oidc_allowed_groups`.
+
+**Sign out** sends the browser to Authentik's end-session endpoint. With
+`ember_oidc_post_logout_redirect_url` empty (the homelab default), Authentik
+shows "You've logged out of Ember" and offers to sign out of Authentik too.
+Setting it registers that URL as a logout URI and makes Authentik skip the
+page and redirect straight back to Ember, while the Authentik session stays.
 
 Ember gives the members of `ember_oidc_admin_groups` the `admin` role, which
 may configure and activate plugins. Everyone else who signs in gets the `user`

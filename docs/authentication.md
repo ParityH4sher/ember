@@ -45,8 +45,10 @@ With sign-in configured, behavior changes as follows:
 - Sessions last `sessionTtl` and are not renewed. Restarting the API signs
   everyone out.
 - **Sign out** removes the Ember session. If the provider advertises an
-  `end_session_endpoint`, the browser is then sent there to end the provider
-  session as well.
+  `end_session_endpoint`, the browser is then sent there, and the provider
+  decides what happens next (see `postLogoutRedirectUrl`). Authentik without
+  `postLogoutRedirectUrl` shows its "You've logged out of Ember" page, which
+  offers to return to Ember or to sign out of Authentik too.
 
 The home page (`/`) and Project notes (`/apps/notes/`) show **Sign in** and
 **Sign out** controls when sign-in is enabled.
@@ -102,7 +104,6 @@ the API only, and excluded from backups.
   "issuer": "https://auth.example.com/application/o/ember/",
   "clientId": "ember",
   "redirectUrl": "https://ember.example.com/api/v1/auth/callback",
-  "postLogoutRedirectUrl": "https://ember.example.com/",
   "scopes": ["openid", "profile", "email"],
   "allowedGroups": ["ember-users"],
   "adminGroups": ["ember-admins"],
@@ -115,7 +116,7 @@ the API only, and excluded from backups.
 | `issuer` | yes | | Must match the `issuer` in the provider's discovery document exactly, including any trailing slash. |
 | `clientId` | yes | | The OAuth client ID registered at the provider. |
 | `redirectUrl` | yes | | The browser-visible callback URL, **including the gateway's `/api` prefix**. Register exactly this URL at the provider. Its origin is also the only origin allowed to send state-changing requests. |
-| `postLogoutRedirectUrl` | no | | Sent to the provider's logout endpoint. Register it at the provider. |
+| `postLogoutRedirectUrl` | no | | Sent to the provider's logout endpoint as `post_logout_redirect_uri`. Register it at the provider. Authentik then signs the person out of Ember only and redirects straight back here, skipping its page that offers to sign out of Authentik as well. Leave it unset to show that page. |
 | `scopes` | no | `openid profile email` | Must include `openid`. |
 | `tokenEndpointAuthMethod` | no | `client_secret_basic` with a secret, `none` without | Also accepts `client_secret_post`. |
 | `groupsClaim` | no | `groups` | ID token claim that lists the user's groups. |

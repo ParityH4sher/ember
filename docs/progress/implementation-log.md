@@ -363,3 +363,31 @@ loopback ports 9095 and 3096, a temporary `stacks_root`, no `.env`.
 
 Not run: anything on the Pi, a real tunnel, and a second container claiming an
 existing host (it is no longer prevented; see ADR 012).
+
+## Sign out shows Authentik's logout page (2026-11-23)
+
+**Problem (user report):** Sign out returned straight to Ember. Authentik's
+"You've logged out of Ember" page, which offers to sign out of Authentik too,
+never appeared, so the Authentik session stayed.
+
+**Cause:** in authentik 2026.8.5 (`providers/oauth2/views/end_session.py` and
+`SessionEndStage` in `flows/stage.py`, read at tag `version/2026.8.5`), a
+registered `post_logout_redirect_uri` plus `id_token_hint` makes the session
+end stage redirect to that URI instead of showing its page. Without the
+parameter, the provider's invalidation flow shows the page. The homelab sent
+`{{ ember_public_url }}/`. Ember's code was correct.
+
+**Change:** the homelab inventory sets `ember_oidc_post_logout_redirect_url`
+to `""`. Ember then omits the parameter, and the blueprint no longer registers
+a logout URI. The docs explain the trade-off. `TestSignOutWithoutPostLogoutRedirect`
+asserts that the logout URL has `id_token_hint` but no `post_logout_redirect_uri`.
+
+Verification (Podman, Go 1.27.4 container): `go vet` and
+`go test -race -count=1 ./...` passed. ansible-core 2.22.0 rendered the real
+blueprint template and the role's `auth.json` expression with the empty value.
+The blueprint lists only the callback URI, and `auth.json` has no
+`postLogoutRedirectUrl`.
+
+Not run: a sign-out against the homelab Authentik. That needs `stacks.yml`
+(blueprint) and `site.yml` (`auth.json` and an API restart). No new image is
+needed. The docs site build was not rerun; the docs change adds no links.
