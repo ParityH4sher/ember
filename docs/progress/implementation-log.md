@@ -422,3 +422,29 @@ Verification:
 
 Not run: `stacks.yml` against the Pi. The services are unchanged, so Compose
 should not recreate the containers.
+
+## ansible-lint and ansible-creator in the devcontainer (2026-11-23)
+
+**Problem (user report):** in the devcontainer, the VS Code Ansible extension
+(`redhat.ansible` 26.11.0) showed "Looks like you don't have an Ansible
+environment set up yet". Its Quick Links panel (`getSystemDetails` in
+`dist/extension/extension.js`) shows this when any of `ansible --version`,
+`python3 --version` or `ansible-creator --version` fails. The extension host
+had the venv first on `PATH`, so Ansible and Python were found. Only
+`ansible-creator` was missing. `ansible-lint`, which the extension uses for
+linting, was also absent. The extension's built-in file patterns already cover
+`infra/ansible` playbooks, roles, `group_vars` and `requirements.yml`.
+
+**Change:** `.devcontainer/setup-ansible.sh` installs
+`ansible-lint==26.11.0` and `ansible-creator==26.11.0` in the same `pip`
+call as `ansible-core==2.22.0`, then prints their versions.
+
+Verification: the edited script ran in a clean `python:3.13-slim` container
+with the repository mounted read-only, and exited 0. `ansible-core` stayed
+2.22.0; `ansible-lint` 26.11.0 (ansible-compat 26.11.0) and
+`ansible-creator` 26.11.0 ran. Calling `ansible-lint` outside its venv first
+printed a "PATH altered" warning, so the script now runs it with the venv on
+`PATH`.
+
+Not run: a devcontainer rebuild, and ansible-lint over `infra/ansible`, so how
+many findings the extension will now show is unknown.
