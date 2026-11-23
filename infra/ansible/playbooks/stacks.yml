@@ -27,9 +27,11 @@
     shared_stacks: "{{ (shared_default_services | default([])) + (shared_optional_services | default([])) }}"
     shared_stack_names: "{{ shared_stacks | map(attribute='name') | list }}"
     # Public ingress: Cloudflare Tunnel -> cloudflared =tunnel network=> Traefik
-    # =edge network=> routed services. Deployed only when ingress_domain is set,
-    # and only after the checks below pass, because these hostnames are
-    # reachable from the internet.
+    # =edge network=> labelled containers. Deployed only when ingress_domain is
+    # set, and only after the checks below pass, because these hostnames are
+    # reachable from the internet. Every route comes from container labels:
+    # Authentik's from this playbook, Ember's from site.yml, which refuses to
+    # label Ember without sign-in.
     ingress_enabled: "{{ (ingress_domain | default('')) | length > 0 }}"
     ingress_stacks:
       - name: traefik
@@ -62,34 +64,20 @@
       when: (repo_env[item.env] | default('')) | length > 0
       no_log: true
 
-    - name: Require explicit, well-formed ingress routes
+    # Authentik routes itself through its labels (PUBLIC_ROUTE, PUBLIC_HOST in
+    # its `env`), and the host name ends up inside a Traefik Host() rule.
+    - name: Require a well-formed public host for each routed stack
       ansible.builtin.assert:
         that:
-          - item.name is match('^[a-z][a-z0-9-]{0,30}$')
-          - item.host is match('^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
-          - item.url is match('^http://[a-z][a-z0-9-]{0,62}:[0-9]{1,5}(/[^\s]*)?$')
+          - (item.env.PUBLIC_HOST | default('')) is match('^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
         fail_msg: >-
-          ingress_routes entries need a lowercase name, a DNS host name and an
-          http://<alias>:<port> URL naming a container alias on the internal
-          `edge` network. Traefik cannot reach anything else.
+          {{ item.name }} sets PUBLIC_ROUTE, so its env needs PUBLIC_HOST: a
+          lowercase DNS name under ingress_domain.
         quiet: true
-      loop: "{{ ingress_routes | default([]) }}"
+      loop: "{{ shared_stacks }}"
       loop_control:
-        label: "{{ item.name | default('?') }}"
-      when: ingress_enabled | bool
-
-    - name: Refuse to publish Ember without sign-in
-      ansible.builtin.assert:
-        that:
-          - ember_oidc_enabled | default(false) | bool
-        fail_msg: >-
-          ingress_routes publishes Ember on the internet, but Ember sign-in
-          (ember_oidc_enabled) is off. Add Authentik to shared_default_services
-          or remove the ember route.
-        quiet: true
-      when:
-        - ingress_enabled | bool
-        - "'ember' in (ingress_routes | default([]) | map(attribute='name'))"
+        label: "{{ item.name }}"
+      when: (item.env.PUBLIC_ROUTE | default('false') | string | lower) == 'true'
   roles:
     - role: container-runtime
       tags: [container-runtime]
@@ -152,6 +140,14 @@
       when:
         - ingress_enabled | bool
         - "'authentik' in shared_stack_names"
+
+    # Earlier versions rendered curated routes into this file. Every route now
+    # comes from labels, so remove it before Traefik starts or reloads.
+    - name: Remove the curated routes of earlier versions
+      ansible.builtin.file:
+        path: "{{ stacks_root }}/traefik/dynamic/routes.yml"
+        state: absent
+      when: ingress_enabled | bool
 
     - name: Deploy the public ingress
       ansible.builtin.include_role:

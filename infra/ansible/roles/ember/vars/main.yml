@@ -7,12 +7,15 @@ ember_compose_files: >-
      + (['compose.oidc.yaml'] if ember_oidc_enabled | bool else [])
      + (['compose.edge.yaml'] if ember_edge_enabled | bool else []) }}
 # Host paths for deploy/compose.oidc.yaml, which mounts them read-only into the
-# API, and the images for deploy/compose.registry.yaml.
+# API, the images for deploy/compose.registry.yaml, and the routed host for
+# deploy/compose.edge.yaml.
 ember_compose_environment: >-
   {{ {'EMBER_HTTP_PORT': ember_http_port | string}
      | combine({'EMBER_IMAGE_REGISTRY': ember_image_registry,
                 'EMBER_IMAGE_TAG': ember_image_tag}
                if ember_from_registry | bool else {})
+     | combine({'EMBER_PUBLIC_HOST': ember_public_host}
+               if ember_edge_enabled | bool else {})
      | combine({'EMBER_AUTH_CONFIG_FILE': ember_install_dir ~ '/config/auth.json',
                 'EMBER_OIDC_CLIENT_SECRET_FILE': ember_install_dir ~ '/config/oidc-client-secret'}
                if ember_oidc_enabled | bool else {}) }}

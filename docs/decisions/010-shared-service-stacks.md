@@ -36,7 +36,9 @@ templates would make Ansible the only way to run them.
 
   Databases never join `edge`, and Traefik has no host networking and no
   published ports.
-- **Routing.** Traefik routes two kinds of host:
+- **Routing.** *Superseded by [ADR 012](012-label-only-routing.md) on
+  2026-11-23: every route now comes from container labels, and curated routes
+  were removed.* Originally, Traefik routed two kinds of host:
   - curated `ingress_routes` from a file, with priority 10000;
   - containers on `edge` that opt in with the label `traefik.enable=true`
     (`exposedByDefault=false`).

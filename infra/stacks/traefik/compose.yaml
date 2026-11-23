@@ -3,14 +3,14 @@
 # - No host networking and no published ports. Traefik sits on internal Docker
 #   networks (the shared ones are created by infra/ansible/roles/ingress_networks):
 #     tunnel:     cloudflared reaches it as http://traefik:8081;
-#     edge:       it reaches routed services, such as http://authentik:9000;
+#     edge:       it reaches labelled containers at their address on `edge`;
 #     docker-api: private to this stack; only the read-only socket proxy.
 #   Internal networks have no internet access, so neither does Traefik.
-# - Two route sources:
-#     file   ./dynamic, rendered from ingress_routes: the curated routes, with
-#            a high priority so that labels cannot take over their hostnames;
-#     docker containers on `edge` labelled traefik.enable=true. Nothing is
-#            routed by default.
+# - Routes come only from container labels: a container on `edge` labelled
+#   traefik.enable=true with a Host() rule is routed. Nothing is routed by
+#   default. Ember (deploy/compose.edge.yaml) and Authentik label themselves.
+# - ./dynamic holds no routes, only the public-https middleware that the entry
+#   point applies to every router (templates/dynamic/middlewares.yml.j2).
 # - Traefik never gets the Docker socket. socket-proxy exposes only read-only
 #   container listing, inspection and events (no POST, no exec, no images).
 # - Cloudflare terminates public TLS. Every request on the tunnel entry point is
@@ -38,6 +38,7 @@ services:
       - --entryPoints.tunnel.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       - --entryPoints.ping.address=127.0.0.1:8082
       - --ping.entryPoint=ping
+      # Only the public-https middleware; routes come from labels.
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
       - --providers.docker.endpoint=tcp://socket-proxy:2375

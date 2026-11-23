@@ -36,6 +36,20 @@
     quiet: true
   when: ember_from_registry | bool
 
+# The edge overlay labels the gateway, so Traefik publishes it as soon as it
+# starts: never without sign-in.
+- name: Refuse to publish Ember without sign-in
+  ansible.builtin.assert:
+    that:
+      - ember_oidc_enabled | bool
+      - ember_public_host is match('^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
+    fail_msg: >-
+      ember_edge_enabled publishes Ember on the internet, so it needs Ember
+      sign-in (ember_oidc_enabled) and a lowercase DNS name in ember_public_host.
+      Add Authentik to shared_default_services, or turn off ember_edge_enabled.
+    quiet: true
+  when: ember_edge_enabled | bool
+
 - name: Stage build inputs on the host
   when: not (ember_from_registry | bool)
   block:

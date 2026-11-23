@@ -148,8 +148,9 @@ Cloudflare ingress/tunnel arrangement. That is a separate deployment profile,
 not a reason to weaken the private-network default.
 
 **Status:** the Cloudflare Tunnel profile is implemented and opt-in. Without
-`ingress_domain`, nothing is public. With it, cloudflared publishes only the
-allowlisted `ingress_routes` through Traefik, after the safeguards in
+`ingress_domain`, nothing is public. With it, cloudflared publishes, through
+Traefik, only containers that opt in with labels
+([ADR 012](../decisions/012-label-only-routing.md)), after the safeguards in
 [ADR 010](../decisions/010-shared-service-stacks.md) pass. See the
 [cloudflared stack](https://github.com/ParityH4sher/ember/tree/main/infra/stacks/cloudflared#security)
 for the security trade-offs.

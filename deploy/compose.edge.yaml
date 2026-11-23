@@ -1,15 +1,22 @@
-# Optional overlay: attach Ember's gateway to the shared internal `edge` network
-# so that the Traefik ingress (infra/stacks/traefik) can route Ember's public
-# host to http://ember-gateway:8080. The Ansible ember role adds it while a
-# public ingress is configured. Without Ansible:
+# Optional overlay: publish Ember's gateway through the Traefik ingress
+# (infra/stacks/traefik). It attaches the gateway to the shared internal `edge`
+# network and labels it, so Traefik routes EMBER_PUBLIC_HOST to it. The Ansible
+# ember role adds it while a public ingress is configured, and only with sign-in
+# on. Without Ansible:
 #   docker network create --internal edge   # once
-#   docker compose -f deploy/compose.yaml -f deploy/compose.edge.yaml up -d
+#   EMBER_PUBLIC_HOST=ember.example.com \
+#     docker compose -f deploy/compose.yaml -f deploy/compose.edge.yaml up -d
+# Do not use it without sign-in (deploy/compose.oidc.yaml): the host is public.
 # The API and the other frontends stay on Ember's private `backend` network.
 services:
   frontend:
     networks:
-      edge:
-        aliases: [ember-gateway]
+      edge: {}
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.ember.rule: "Host(`${EMBER_PUBLIC_HOST:?set EMBER_PUBLIC_HOST to Ember's public host name}`)"
+      traefik.http.routers.ember.entrypoints: tunnel
+      traefik.http.services.ember.loadbalancer.server.port: "8080"
 
 networks:
   edge:

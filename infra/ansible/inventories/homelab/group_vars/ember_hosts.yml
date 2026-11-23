@@ -21,15 +21,18 @@ shared_default_services:
   - name: authentik
     env:
       HTTP_PORT: "9000"
+      # Authentik's Traefik labels route PUBLIC_HOST while PUBLIC_ROUTE is true.
+      PUBLIC_ROUTE: "{{ (ingress_domain | length > 0) | string | lower }}"
+      PUBLIC_HOST: "{{ authentik_public_host }}"
 shared_optional_services: []
 
 # Public ingress through a Cloudflare Tunnel. While ingress_domain is empty,
 # nothing is public: Tailscale Serve publishes Ember on the tailnet, and the
 # stacks are reachable only on the host's loopback interface.
-# Setting a Cloudflare zone PUBLISHES THE ROUTES BELOW ON THE INTERNET, with
+# Setting a Cloudflare zone PUBLISHES THE HOSTS BELOW ON THE INTERNET, with
 # Ember sign-in through Authentik (infra/stacks/cloudflared/README.md):
 #   1. in Cloudflare Zero Trust, give the tunnel a public hostname for each
-#      route host below, each with service HTTP -> traefik:8081;
+#      host below, each with service HTTP -> traefik:8081;
 #   2. put CLOUDFLARE_TUNNEL_TOKEN in the repository's gitignored .env;
 #   3. run stacks.yml. It refuses to publish until Authentik's admin account is
 #      claimed (set it up over SSH), and Authentik generates Ember's client secret;
@@ -37,21 +40,16 @@ shared_optional_services: []
 # Keep hosts one level below the zone: Cloudflare's free certificate covers
 # ember-poc.example.com, not ember.home.example.com.
 ingress_domain: parityh4sher.org
-# Public host names. They are used for the routes, Ember's URLs and the OIDC
-# issuer, so the three can never disagree.
+# Public host names. They are used for the Traefik labels, Ember's URLs and the
+# OIDC issuer, so the three can never disagree.
 ember_public_host: "ember-poc.{{ ingress_domain }}"
 authentik_public_host: "auth.{{ ingress_domain }}"
-# Traefik reaches services on the internal `edge` network by container alias.
-# A service joins `edge` with an alias in its Compose file (Ember:
-# deploy/compose.edge.yaml, Authentik: infra/stacks/authentik/compose.yaml).
-ingress_routes:
-  - name: ember
-    host: "{{ ember_public_host }}"
-    url: "http://ember-gateway:8080"
-  - name: authentik
-    host: "{{ authentik_public_host }}"
-    url: "http://authentik:9000"
-# Put Ember's gateway on `edge` whenever the ingress is on.
+# Every route comes from container labels: a container on the internal `edge`
+# network with traefik.enable=true and a Host() rule is published (Ember:
+# deploy/compose.edge.yaml, Authentik: infra/stacks/authentik/compose.yaml,
+# your own: infra/stacks/traefik/README.md).
+# Label Ember's gateway for Traefik whenever the ingress is on (site.yml
+# refuses without sign-in).
 ember_edge_enabled: "{{ ingress_domain | length > 0 }}"
 
 # Ember sign-in (docs/authentication.md). site.yml writes these into Ember's

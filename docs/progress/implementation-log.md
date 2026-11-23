@@ -313,3 +313,53 @@ member of `ember-admins` arrives with that group in the `groups` claim. The
 earlier Authentik run did show groups in the session. Also not run: a real
 browser, the bundle smoke test, `--syntax-check` of the playbooks, and a
 deployment.
+
+## Label-only Traefik routing (2026-11-23)
+
+Implemented [ADR 012](../decisions/012-label-only-routing.md). The operator
+wants every public route defined by labels on the containers themselves. Asked
+to choose, the operator kept the read-only socket proxy rather than mounting
+the Docker socket into Traefik.
+
+- The curated `ingress_routes` are removed. Traefik's file provider now holds
+  only the `public-https` middleware (`templates/dynamic/middlewares.yml.j2`).
+- Ember's gateway labels itself in `deploy/compose.edge.yaml` with
+  `EMBER_PUBLIC_HOST`. Its `ember-gateway` alias is gone.
+- Authentik's server labels itself while `PUBLIC_ROUTE` is true, with
+  `PUBLIC_HOST`. Its `authentik` alias is gone.
+- The "no Ember without sign-in" check moved from `stacks.yml` to the `ember`
+  role, where Ember gets labelled.
+- `stacks.yml` checks each routed stack's `PUBLIC_HOST` and deletes the old
+  `dynamic/routes.yml`.
+
+Verified on Fedora x86_64 with Docker Engine 29.10.0, in a root container
+running ansible-core 2.22.0, community.docker 5.4.0 and Compose 5.7.1, against
+the host daemon. The inventory was a localhost copy of homelab: `example.test`,
+loopback ports 9095 and 3096, a temporary `stacks_root`, no `.env`.
+
+- `--syntax-check` passed for `site.yml` and `stacks.yml` with the homelab
+  inventory.
+- `stacks.yml` run 1: the `PUBLIC_HOST` check passed, Authentik became
+  healthy, and the play stopped at the unclaimed-`akadmin` assertion.
+- After `akadmin` got a password, run 2 did the following:
+  - deleted a planted `dynamic/routes.yml`;
+  - rendered `middlewares.yml`;
+  - deployed Traefik healthy;
+  - stopped at cloudflared's missing token, as expected.
+- The `ember` role (registry images, edge, sign-in on) deployed Ember. With
+  `-e ember_oidc_enabled=false`, it failed at the new assertion and deployed
+  nothing.
+- These requests went from a container on `tunnel` to `traefik:8081`, using
+  only label routes:
+  - Authentik's discovery returned 200 with issuer
+    `https://auth.example.test/application/o/ember/`, so the middleware still
+    applies;
+  - Ember's `/`, `/apps/notes/`, `/api/healthz` (GHCR `8464612…`) and
+    `/api/v1/auth/session` (`"enabled":true`) returned 200;
+  - an unlabelled host returned 404.
+- Traefik logged no errors.
+- The test projects, volumes, networks, files and images were removed
+  afterwards.
+
+Not run: anything on the Pi, a real tunnel, and a second container claiming an
+existing host (it is no longer prevented; see ADR 012).

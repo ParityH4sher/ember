@@ -135,20 +135,18 @@ The inventory chooses what to deploy (see
 | --- | --- |
 | `shared_default_services` | Stacks that are always present, each as `{name, env}`; `env` becomes the stack's `.env`. |
 | `shared_optional_services` | Optional integrations such as Immich; same format. |
-| `ingress_domain` | Empty: nothing is public, and Tailscale Serve publishes Ember on the tailnet. A Cloudflare zone: Traefik and cloudflared **publish `ingress_routes` on the internet** through a Cloudflare Tunnel. |
-| `ingress_routes` | Curated routes: `{name, host, url}`, where `url` is `http://<alias>:<port>` of a container on the internal `edge` network. They take precedence over container labels. Containers can also opt in with Traefik labels (see the [Traefik stack](../stacks/traefik/README.md#two-ways-to-route)). |
-| `ember_edge_enabled` | Put Ember's gateway on `edge` as `ember-gateway` (`deploy/compose.edge.yaml`). The homelab inventory turns it on with the ingress. |
+| `ingress_domain` | Empty: nothing is public, and Tailscale Serve publishes Ember on the tailnet. A Cloudflare zone: Traefik and cloudflared **publish every labelled container on the internet** through a Cloudflare Tunnel. |
+| `ember_public_host`, `authentik_public_host` | Public host names. They go into the Traefik labels (Ember's `EMBER_PUBLIC_HOST`, Authentik's `PUBLIC_HOST`), Ember's URLs and the OIDC issuer. Every route comes from container labels (see the [Traefik stack](../stacks/traefik/README.md#routing-with-labels)). |
+| `ember_edge_enabled` | Put Ember's gateway on `edge` with Traefik labels for `ember_public_host` (`deploy/compose.edge.yaml`). `site.yml` refuses it unless Ember sign-in is on. The homelab inventory turns it on with the ingress. |
 
 `stacks.yml` creates the internal Docker networks `tunnel` (cloudflared ↔
 Traefik) and `edge` (Traefik ↔ routed services) before deploying any stack
 (`roles/ingress_networks`).
 
-Before deploying the ingress, `stacks.yml` checks two things and fails
-otherwise:
-
-- Ember sign-in must be on if Ember is routed.
-- Authentik's administrator account must be claimed. On a fresh install, claim
-  it over SSH as the failure message explains, then rerun.
+Before deploying the ingress, `stacks.yml` requires Authentik's administrator
+account to be claimed. On a fresh install, claim it over SSH as the failure
+message explains, then rerun. Ember labels itself from `site.yml`, which
+refuses to do so unless Ember sign-in is on.
 
 Put operator secrets in the repository's **gitignored** `.env` (copy
 `.env.example`, then `chmod 600 .env`). The playbook reads it on the controller,

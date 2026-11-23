@@ -21,11 +21,12 @@ ember_image_tag: latest
 ember_registry_username: ""
 ember_registry_token: ""
 
-# Attach Ember's gateway to the shared internal `edge` network as
-# `ember-gateway`, so the Traefik ingress can route to it
-# (deploy/compose.edge.yaml). The homelab inventory enables it with
-# ingress_domain.
+# Publish Ember through the Traefik ingress: attach the gateway to the shared
+# internal `edge` network and label it with ember_public_host
+# (deploy/compose.edge.yaml). Requires sign-in (ember_oidc_enabled). The
+# homelab inventory enables it with ingress_domain.
 ember_edge_enabled: false
+ember_public_host: ""
 
 # Optional OpenID Connect sign-in (docs/authentication.md). The homelab
 # inventory enables it with the ingress and the Authentik stack, and derives

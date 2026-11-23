@@ -6,8 +6,8 @@ shared internal `edge` network. It is deployed, together with `cloudflared`,
 only when the inventory sets `ingress_domain`.
 
 ```text
-visitor ─HTTPS─▶ Cloudflare ══tunnel══▶ cloudflared ─[tunnel net]─▶ traefik:8081 ─[edge net]─▶ ember-gateway:8080
-                 (public TLS)                (outbound only)          (routing)              authentik:9000
+visitor ─HTTPS─▶ Cloudflare ══tunnel══▶ cloudflared ─[tunnel net]─▶ traefik:8081 ─[edge net]─▶ Ember's gateway
+                 (public TLS)                (outbound only)          (routing)              Authentik's server
                                                                           │                    <your container>
                                                               [docker-api net] socket-proxy (read-only)
 ```
@@ -15,7 +15,7 @@ visitor ─HTTPS─▶ Cloudflare ══tunnel══▶ cloudflared ─[tunnel n
 | Network | Members | Purpose |
 | --- | --- | --- |
 | `tunnel` (internal, shared) | cloudflared, Traefik (`traefik`) | cloudflared can reach only Traefik |
-| `edge` (internal, shared) | Traefik, and the front container of every routed service | Traefik reaches services by alias |
+| `edge` (internal, shared) | Traefik, and the front container of every routed service | Traefik reaches labelled containers at their `edge` address |
 | `docker-api` (internal, this stack) | Traefik, socket-proxy | Label discovery |
 
 Internal networks have no internet access. Databases and other internal
@@ -29,15 +29,18 @@ once for each.
 | Entry point | `tunnel` on port 8081, reachable only on the internal networks; no published ports |
 | Secrets | none |
 
-## Two ways to route
+## Routing with labels
 
-**1. Curated routes (file provider).** `ingress_routes` in the inventory is
-rendered into `dynamic/routes.yml`. Ember and Authentik are routed this way.
-These routes have priority 10000, so a container label cannot take over their
-hostnames. `stacks.yml` refuses to publish Ember unless sign-in is on.
+Every route comes from container labels (ADR 012). A container is routed when
+it is on `edge` **and** opts in with `traefik.enable=true` and a `Host()` rule.
+Ember and Authentik label themselves:
 
-**2. Container labels (Docker provider).** A container is routed when it is on
-`edge` **and** opts in. For example, in its Compose file:
+| Service | Labels in | Host from |
+| --- | --- | --- |
+| Ember's gateway | `deploy/compose.edge.yaml`, added by `site.yml`, which refuses unless Ember sign-in is on | `EMBER_PUBLIC_HOST` (`ember_public_host`) |
+| Authentik's server | `infra/stacks/authentik/compose.yaml`, active while `PUBLIC_ROUTE` is `true` | `PUBLIC_HOST` in its `env` (`authentik_public_host`) |
+
+Your own container, in its Compose file:
 
 ```yaml
 services:
@@ -62,6 +65,15 @@ attach to the `tunnel` entry point by default.
 
 **A labelled container is on the public internet.** It must enforce its own
 authentication. Review labels like any other change that publishes something.
+Router names must be unique on the host: `ember` and `authentik` are taken.
+
+**Nothing reserves a hostname.** Any container on `edge` can label itself with
+``Host(`auth.<domain>`)`` too, and Traefik then has two routers for one host.
+Only start containers on `edge` that you trust as much as Ember and Authentik.
+
+`dynamic/` holds no routes. It contains only the `public-https` middleware
+(`templates/dynamic/middlewares.yml.j2`), which the entry point applies to
+every router.
 
 ## Security
 
@@ -83,17 +95,19 @@ authentication. Review labels like any other change that publishes something.
 
 Verified locally:
 
-- the file route works and wins over a label claiming the same host;
+- Ember and Authentik are routed by their labels alone (2026-11-23): Authentik
+  advertises an `https://` issuer, and Ember serves its pages, health and
+  session through Traefik;
 - a labelled container is routed and receives the HTTPS header;
 - labels without `traefik.enable` get 404;
 - the proxy answers 403 to container creation, images, and secrets;
 - `tunnel` members cannot reach `edge` services directly.
 
-## Routes without Ansible
+## Without Ansible
 
-Write `dynamic/routes.yml` by hand. It must be readable by UID 65532: use a
-0755 directory and a 0644 file. The `public-https` middleware must be defined
-here, because the entry point refers to it.
+Traefik needs `dynamic/middlewares.yml`, because the entry point refers to the
+`public-https` middleware. It must be readable by UID 65532: use a 0755
+directory and a 0644 file.
 
 ```yaml
 http:
@@ -102,15 +116,10 @@ http:
       headers:
         customRequestHeaders:
           X-Forwarded-Proto: https
-  routers:
-    authentik:
-      rule: Host(`auth.example.com`)
-      entryPoints: [tunnel]
-      priority: 10000
-      service: authentik
-  services:
-    authentik:
-      loadBalancer:
-        servers:
-          - url: http://authentik:9000
 ```
+
+Routes still come from labels. For Authentik, set `PUBLIC_ROUTE=true` and
+`PUBLIC_HOST=auth.example.com` in its `.env`.
+
+Hosts upgraded from the curated-route version have a `dynamic/routes.yml`;
+`stacks.yml` deletes it. Without Ansible, delete it yourself.

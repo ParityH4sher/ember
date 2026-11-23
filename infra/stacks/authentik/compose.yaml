@@ -64,9 +64,10 @@ services:
     volumes:
       - database:/var/lib/postgresql/data
 
-  # Only the server joins the shared `edge` network, where Traefik reaches it as
-  # http://authentik:9000. PostgreSQL and the worker stay on this stack's own
-  # network. The loopback port is for administration over an SSH tunnel.
+  # Only the server joins the shared `edge` network, where Traefik routes
+  # PUBLIC_HOST to it while PUBLIC_ROUTE is true. PostgreSQL and the worker stay
+  # on this stack's own network. The loopback port is for administration over
+  # an SSH tunnel.
   server:
     <<: *authentik
     command: server
@@ -74,8 +75,12 @@ services:
       - "127.0.0.1:${HTTP_PORT:-9000}:9000"
     networks:
       default: {}
-      edge:
-        aliases: [authentik]
+      edge: {}
+    labels:
+      traefik.enable: "${PUBLIC_ROUTE:-false}"
+      traefik.http.routers.authentik.rule: "Host(`${PUBLIC_HOST:-unset.invalid}`)"
+      traefik.http.routers.authentik.entrypoints: tunnel
+      traefik.http.services.authentik.loadbalancer.server.port: "9000"
 
   # The worker applies blueprints. ./blueprints holds the rendered Ember client
   # (templates/blueprints/ember.yaml.j2); the blueprint reads the client secret

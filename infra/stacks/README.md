@@ -11,7 +11,7 @@ Deploying, reinstalling, or deleting Ember must never touch them.
 | Stack | Role |
 | --- | --- |
 | [`authentik/`](authentik/README.md) | Identity provider for human sign-in (DEC-002) |
-| [`traefik/`](traefik/README.md) | Routes public hostnames to containers on the internal `edge` network (curated routes plus opted-in labels) |
+| [`traefik/`](traefik/README.md) | Routes public hostnames to labelled containers on the internal `edge` network |
 | [`cloudflared/`](cloudflared/README.md) | Cloudflare Tunnel connector: public subdomains → Traefik, outbound only |
 
 `traefik` and `cloudflared` form the public ingress. They are deployed only when
@@ -35,8 +35,8 @@ the inventory sets `ingress_domain`, and only after the safety checks in
 - **Non-secret settings** come from `.env`, interpolated by Compose. Document
   each variable in `.env.example`.
 - **Private by default.** A web UI that Traefik should route joins the shared
-  internal `edge` network with an alias (for example `aliases: [authentik]`);
-  only that front container joins. Databases and caches stay on the stack's own
+  internal `edge` network and carries Traefik labels; only that front container
+  joins. Databases and caches stay on the stack's own
   network. A loopback port (`127.0.0.1:…`) is optional, for administration over
   SSH. Never mount the Docker socket; only Traefik's read-only socket proxy
   touches it.
@@ -85,10 +85,9 @@ sudo docker compose up -d --wait
    `.env.example`, and a README covering data, backup, restore, and upgrades.
 2. Add it to `shared_default_services` (cannot be deactivated in Ember) or
    `shared_optional_services` (an optional integration) in the inventory.
-3. To publish it, put its front container on `edge` with an alias, then either
-   add an `ingress_routes` entry (`url: http://<alias>:<port>`) or give the
-   container Traefik labels (see the
-   [Traefik stack](traefik/README.md#two-ways-to-route)). Make sure Cloudflare
+3. To publish it, put its front container on `edge` and give it Traefik labels
+   (see the [Traefik stack](traefik/README.md#routing-with-labels)), with its
+   host from a `PUBLIC_HOST` setting as Authentik does. Make sure Cloudflare
    sends the subdomain to the tunnel. It is then reachable from the internet, so
    it must enforce its own authentication.
 

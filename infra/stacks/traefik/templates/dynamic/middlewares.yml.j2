@@ -1,0 +1,12 @@
+{#- Rendered by the Ansible `stack` role. It holds no routes: every route comes
+    from container labels (README.md). -#}
+# Managed by Ansible; local edits are overwritten.
+# public-https is applied to every router on the tunnel entry point
+# (--entryPoints.tunnel.http.middlewares). Cloudflare terminates TLS, so
+# applications must be told that the visitor used HTTPS.
+http:
+  middlewares:
+    public-https:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: https

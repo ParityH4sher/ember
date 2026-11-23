@@ -63,10 +63,10 @@ switched off.
    Cloudflare creates the proxied DNS records. If you created "DNS only" A
    records for these names earlier, delete them.
 4. **Inventory.** Set `ingress_domain`, and the host variables above if you
-   want other names. To publish another service, either add an `ingress_routes`
-   entry or give its container Traefik labels and put it on `edge` (see the
-   [Traefik stack](../traefik/README.md#two-ways-to-route)). Without the wildcard,
-   also add its hostname here.
+   want other names. To publish another service, give its container Traefik
+   labels and put it on `edge` (see the
+   [Traefik stack](../traefik/README.md#routing-with-labels)). Without the
+   wildcard, also add its hostname here.
 5. **Roll out.**
    1. Run `playbooks/stacks.yml`. On a fresh Authentik it stops before
       publishing anything.
@@ -82,8 +82,8 @@ Cloudflare dashboard.
 ## Security
 
 - **Everything routed is reachable by anyone on the internet.** Ember enforces
-  its own sign-in, and Authentik is the login page. Anything else you route,
-  whether through `ingress_routes` or container labels, must protect itself.
+  its own sign-in, and Authentik is the login page. Any other container you
+  label must protect itself.
   With the wildcard hostname, starting a labelled container is enough to
   publish it.
 - **Protect the admin account.** Enable MFA for Authentik administrators. Its
@@ -95,8 +95,8 @@ Cloudflare dashboard.
   policy for `/application/o/`.
 - **Trust in Cloudflare.** The tunnel is remotely managed: whoever controls
   the Cloudflare account controls which hostnames reach the tunnel. Traefik
-  still decides what those hostnames reach: the curated routes and opted-in
-  containers on `edge`, nothing else. Treat the tunnel token like a
+  still decides what those hostnames reach: opted-in containers on `edge`,
+  nothing else. Treat the tunnel token like a
   password; rotate it in the dashboard if it leaks, then rerun `stacks.yml`.
 - **The tailnet path for Ember goes away.** With a domain set, Ember's public
   URL is the only place sign-in works, so Tailscale Serve no longer publishes

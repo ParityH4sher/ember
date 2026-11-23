@@ -8,7 +8,7 @@ as an OpenID Connect issuer ([sign-in guide](../../../docs/authentication.md)).
 | Item | Value |
 | --- | --- |
 | Version | 2026.8.5 with PostgreSQL 16.16. Images are pinned by digest for amd64 and arm64. |
-| Web UI | Traefik reaches the `server` container as `http://authentik:9000` on the internal `edge` network and routes `auth.<ingress_domain>` to it. `http://127.0.0.1:${HTTP_PORT}` (default 9000) on the host is for administration over SSH. |
+| Web UI | The `server` container is on the internal `edge` network, and its Traefik labels route `PUBLIC_HOST` (`auth.<ingress_domain>`) to its port 9000 while `PUBLIC_ROUTE` is `true`. `http://127.0.0.1:${HTTP_PORT}` (default 9000) on the host is for administration over SSH. |
 | Data | Volumes `stack-authentik_database` (PostgreSQL) and `stack-authentik_data` (uploaded media) |
 | Secrets | `secrets/authentik_secret_key`, `secrets/authentik_postgres_password` and `secrets/ember_oidc_client_secret`, generated once by Ansible |
 | Blueprints | `blueprints/ember.yaml` (Ember's OIDC client), mounted into the worker at `/blueprints/custom` |
