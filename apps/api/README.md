@@ -14,8 +14,11 @@ go build .
 - `internal/httpapi/`: HTTP routing, request validation, plugin/project handlers.
 - `internal/plugins/`: plugin contract types.
 - `internal/plugins/weather/`: versioned Weather plugin adapter for Open-Meteo.
-- `internal/projects/`: disk-backed project registration and Markdown vaults;
-  an in-memory index lists active projects.
+- `internal/projects/`: disk-backed project registration, Markdown vaults and
+  chat transcripts (`chats/<id>.json`); an in-memory index lists active projects.
+- `internal/agents/`: project chat's agents file (`EMBER_AGENTS_CONFIG_FILE`),
+  the `ember.chat-turn/v1` envelope and the sandbox router client
+  ([project chat](../../docs/project-chat.md)).
 - `internal/projectfiles/`: filesystem storage for one project’s contents, independent of HTTP project records.
 
 The API module is compiled as one service, while the `internal/` packages keep

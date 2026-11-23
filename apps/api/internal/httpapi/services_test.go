@@ -18,7 +18,7 @@ func TestServiceDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := as(auth.RoleUser, newHandler("test", nil, nil, links...))
+	handler := as(auth.RoleUser, newHandler("test", nil, nil, links, options{}))
 	for path, want := range map[string]string{"/v1/services": `"name":"Authentik"`, "/v1/plugins": `"plugins":[]`} {
 		r := httptest.NewRecorder()
 		handler.ServeHTTP(r, httptest.NewRequest("GET", path, nil))

@@ -23,6 +23,8 @@ jobs:
         working-directory: services/sandbox-router
       - run: python3 -B -m unittest discover -s pilot
         working-directory: services/sandbox-router
+      - run: python3 -B -m unittest discover -s chat-fixture
+        working-directory: services/sandbox-router
 
   bundle:
     needs: test

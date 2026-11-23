@@ -31,19 +31,36 @@ func NewHandler(version string, vaults *projects.Vaults, services ...ServiceLink
 	return NewDeploymentHandler(version, vaults, services, nil)
 }
 
-func NewDeploymentHandler(version string, vaults *projects.Vaults, services []ServiceLink, extra []plugins.Registration) http.Handler {
+// Option adds an optional capability to the deployment handler.
+type Option func(*options)
+
+type options struct {
+	chatRuns *ChatRuns
+}
+
+// WithChatRuns lets chats start agent runs. Without it, chats are read-only
+// and GET /v1/agents reports enabled: false.
+func WithChatRuns(runs *ChatRuns) Option {
+	return func(o *options) { o.chatRuns = runs }
+}
+
+func NewDeploymentHandler(version string, vaults *projects.Vaults, services []ServiceLink, extra []plugins.Registration, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return newHandler(version, vaults, append([]plugins.Registration{
 		{Definition: immich.Definition(), Adapter: immich.New()},
 		{Definition: weather.Definition(), Adapter: weather.New()},
-	}, extra...), services...)
+	}, extra...), services, o)
 }
 
 // NewHandlerWithPlugins is also useful for deterministic adapter tests.
 func NewHandlerWithPlugins(version string, registrations []plugins.Registration) http.Handler {
-	return newHandler(version, projects.NewMemoryStore(), registrations)
+	return newHandler(version, projects.NewMemoryStore(), registrations, nil, options{})
 }
 
-func newHandler(version string, store projects.Store, registrations []plugins.Registration, services ...ServiceLink) http.Handler {
+func newHandler(version string, store projects.Store, registrations []plugins.Registration, services []ServiceLink, o options) http.Handler {
 	server := &Server{
 		plugins:  make(map[string]*pluginState, len(registrations)),
 		projects: store,
@@ -79,9 +96,18 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 	route("POST /v1/projects", auth.RoleUser, server.createProject)
 	route("GET /v1/projects", auth.RoleUser, server.listProjects)
 	route("DELETE /v1/projects/{projectId}", auth.RoleUser, server.deleteProject)
+	chats := &chatAPI{runs: o.chatRuns, projects: store}
+	route("GET /v1/agents", auth.RoleUser, chats.listAgents)
 	if vaults, ok := store.(*projects.Vaults); ok {
 		route("GET /v1/projects/{projectId}/notes", auth.RoleUser, listNotes(vaults))
 		route("PUT /v1/projects/{projectId}/notes", auth.RoleUser, saveNote(vaults))
+		// Chat runs start containers on the router's host. Roles are not yet
+		// scoped to projects, so any user may chat in any project.
+		chats.vaults = vaults
+		route("GET /v1/projects/{projectId}/chats", auth.RoleUser, chats.list)
+		route("POST /v1/projects/{projectId}/chats", auth.RoleUser, chats.create)
+		route("GET /v1/projects/{projectId}/chats/{chatId}", auth.RoleUser, chats.get)
+		route("POST /v1/projects/{projectId}/chats/{chatId}/messages", auth.RoleUser, chats.send)
 	}
 	return mux
 }

@@ -13,8 +13,11 @@ image contract; neither depends on a particular agent vendor.
 The service listens on an operator-only Unix socket. Anyone with access may
 invoke any registered agent; keep code-executing agents exclusively under
 `isolated`. If Kata is unavailable, the request fails. No default runtime
-retry. The unauthenticated Ember web API and the Compose installer are not
-connected to this prototype.
+retry. The Compose installer does not connect to this prototype. The Ember API
+calls `/v1/runs` for [project chat](../../docs/project-chat.md) only when the
+operator gives it an agents file naming this socket, and then only with sign-in
+on (or an explicit loopback-development opt-in). `chat-fixture/` is an offline
+agent for that path.
 
 ## Try it
 

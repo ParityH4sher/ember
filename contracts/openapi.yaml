@@ -11,12 +11,15 @@ info:
     session cookie, state-changing requests must come from the configured
     browser origin, and signed-in access pauses while the identity provider is
     unreachable. Each signed-in user has a role taken from identity provider
-    groups: user (read Ember, use projects and notes, call plugin operations)
+    groups: user (read Ember, use projects, notes and chats, call plugin operations)
     or admin (also configure and activate plugins). Without sign-in every
     caller is an admin. Roles do not yet distinguish projects.
     Plugin configuration and plugin operations are prototype behavior; only the
     Weather plugin currently makes a fixed upstream request. Other listed
-    plugins may be configuration-only.
+    plugins may be configuration-only. Project chat runs an operator-registered
+    agent in the sandbox router; it is off unless the operator configures
+    agents, and the API then refuses to start without sign-in unless the
+    operator explicitly allows it for loopback development.
 servers:
   - url: http://localhost:3000/api
 security:
@@ -324,6 +327,218 @@ paths:
         "404": {description: Project not found}
         "409": {description: Stored content differs from the supplied previous content}
         "413": {description: Note or project exceeds the size limit}
+  /v1/agents:
+    get:
+      operationId: listAgents
+      summary: Agents the operator registered for project chat
+      description: >-
+        Chat runs are off unless the operator supplies an agents configuration
+        file (EMBER_AGENTS_CONFIG_FILE). Each agent is an image registered in the
+        sandbox router's policy; this list carries only its ID and display name.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Whether chat runs are on, and the agents a chat may use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
+  /v1/projects/{projectId}/chats:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listProjectChats
+      summary: List the project's chats, most recently updated first
+      description: Works while chat runs are off; transcripts are project files.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: Chat summaries without message text
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [chats]
+                properties:
+                  chats:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatSummary"
+        "404":
+          description: "Project not found (project_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createProjectChat
+      summary: Start a chat with a registered agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [agent]
+              properties:
+                agent:
+                  type: string
+                  description: ID of an agent listed by GET /v1/agents
+                title:
+                  type: string
+                  maxLength: 120
+                  description: Optional. Defaults to the start of the first message.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "201":
+          description: Chat created with no messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chat"
+        "400":
+          description: "Invalid body (invalid_chat) or an agent that is not registered (unknown_agent)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Project not found (project_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: "The project already has the maximum of 100 chats (chat_limit)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: >-
+            Chat runs are off on this instance (agents_unavailable), or the
+            identity provider is unreachable (identity_provider_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+    get:
+      operationId: getProjectChat
+      summary: Load one chat with all its messages
+      description: >-
+        Poll this while an agent message is pending. A pending message whose run
+        is no longer in progress, for example after an API restart, is returned
+        as failed with an interruption error.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "200":
+          description: The chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chat"
+        "404":
+          description: "Project or chat not found (project_not_found, chat_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+    post:
+      operationId: sendProjectChatMessage
+      summary: Send a message and start one sandboxed agent run
+      description: >-
+        Saves the message and a pending agent message, then returns at once.
+        The API runs the chat's agent once in the sandbox router with the
+        conversation (oldest messages are left out when it would exceed the
+        router's 32 KiB input limit) and replaces the pending message with the
+        answer or a failure. Poll GET /v1/projects/{projectId}/chats/{chatId}
+        until no message is pending. Nothing is saved when the request is
+        refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: Non-empty UTF-8 text without NUL, at most 16 KiB.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "202":
+          description: Message saved and agent run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chat"
+        "400":
+          description: "Empty or invalid message (invalid_message)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Project or chat not found (project_not_found, chat_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "This chat already has a run in progress (chat_busy)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: >-
+            The message is too large to send to the agent (message_too_large),
+            or the chat reached its 1 MiB size limit (chat_full)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "Another chat is using the agent runner (agent_busy); retry later"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: >-
+            Chat runs are off on this instance (agents_unavailable), or the
+            identity provider is unreachable (identity_provider_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/services:
     get:
       operationId: listServiceLinks
@@ -697,6 +912,13 @@ components:
       required: true
       schema:
         type: string
+    ChatId:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{16}$'
   schemas:
     Health:
       type: object
@@ -878,3 +1100,107 @@ components:
       additionalProperties: false
       properties:
         data: {}
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+          description: The agent's name in the sandbox router policy.
+        name:
+          type: string
+          description: Display name chosen by the operator.
+    AgentList:
+      type: object
+      additionalProperties: false
+      required: [enabled, agents]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether this instance can run agents for chats.
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+    ChatSummary:
+      type: object
+      additionalProperties: false
+      required: [id, title, agent, created, updated, messageCount, pending]
+      properties:
+        id:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+        title:
+          type: string
+        agent:
+          type: string
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time
+        messageCount:
+          type: integer
+          minimum: 0
+        pending:
+          type: boolean
+          description: Whether an agent run for this chat is in progress.
+    Chat:
+      type: object
+      additionalProperties: false
+      required: [schema, id, title, agent, created, updated, messages]
+      description: >-
+        Stored as chats/<id>.json in the project directory. The file uses the
+        same shape, so it stays readable without Ember.
+      properties:
+        schema:
+          type: string
+          const: ember.chat/v1
+        id:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+        title:
+          type: string
+        agent:
+          type: string
+          description: ID of the agent this chat runs.
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required: [id, role, content, created]
+      properties:
+        id:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+        role:
+          type: string
+          enum: [user, agent]
+        content:
+          type: string
+          description: Message text. Agent answers are plain text or Markdown; render them as text.
+        status:
+          type: string
+          enum: [pending, completed, failed]
+          description: Present on agent messages only.
+        error:
+          type: string
+          description: User-facing reason, present when status is failed.
+        run:
+          type: string
+          description: Sandbox router run ID, for the operator's router log.
+        created:
+          type: string
+          format: date-time

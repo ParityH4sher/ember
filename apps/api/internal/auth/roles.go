@@ -9,7 +9,7 @@ type Role int
 const (
 	// RoleNone means no role was established for the request.
 	RoleNone Role = iota
-	// RoleUser may read Ember, use projects and notes, and call plugin operations.
+	// RoleUser may read Ember, use projects, notes and chats, and call plugin operations.
 	RoleUser
 	// RoleAdmin may also configure, activate and deactivate plugins.
 	RoleAdmin

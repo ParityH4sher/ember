@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { replaceState } from '$app/navigation';
   import {
-    createProject, getSession, listProjects, loadNotes, saveNote, signInUrl, signOut, SignInRequired,
-    type Notes, type Project, type Session
+    createChat, createProject, getChat, getSession, listAgents, listChats, listProjects, loadNotes, saveNote,
+    sendMessage, signInUrl, signOut, SignInRequired,
+    type Agent, type Chat, type ChatSummary, type Notes, type Project, type Session
   } from '../lib/api';
   import { blocks } from '../lib/links';
   import '../notes.css';
@@ -18,7 +19,15 @@
   let references = $derived(paths.filter(p => p !== path &&
     [...blocks(notes[p] ?? '', p, notes)].some(([,parts]) => parts.some(t => t.path === path))));
 
+  // Project chat: each message runs the chat's agent once in the sandbox router.
+  let agents = $state.raw<Agent[]>([]), agentsEnabled = $state(false), agentChoice = $state('');
+  let chats = $state.raw<ChatSummary[]>([]), chat = $state.raw<Chat | null>(null);
+  let chatDraft = $state(''), poll = $state(0);
+  let waiting = $derived(chat?.messages.some(m => m.status === 'pending') ?? false);
+  const agentName = (id: string) => agents.find(a => a.id === id)?.name ?? id;
+
   const query = (dest: string) => '?' + new URLSearchParams({project, note: dest});
+  const chatQuery = (id: string) => '?' + new URLSearchParams({project, chat: id});
   const leave = () => !dirty || confirm('Discard unsaved changes?');
 
   async function action(fn: () => Promise<void>) {
@@ -43,6 +52,7 @@
     if (target) location.assign(target); else location.reload();
   }
   function openNote(dest: string) {
+    chat = null;
     path = dest;
     replaceState(query(dest), {});
     editing = !Object.hasOwn(notes, path);
@@ -54,12 +64,51 @@
     e.preventDefault();
     if (leave()) openNote(dest);
   }
-  async function select(id: string, dest = 'index.md') {
+  const summary = (c: Chat): ChatSummary => ({
+    id: c.id, title: c.title, agent: c.agent, created: c.created, updated: c.updated,
+    messageCount: c.messages.length, pending: c.messages.some(m => m.status === 'pending')
+  });
+  function showChat(c: Chat) {
+    chat = c;
+    chats = [summary(c), ...chats.filter(s => s.id !== c.id)];
+  }
+  async function openChat(id: string) {
+    const loaded = await getChat(project, id);
+    editing = false;
+    path = '';
+    replaceState(chatQuery(id), {});
+    message = '';
+    chat = loaded;
+  }
+  function followChat(e: MouseEvent, id: string) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (leave()) action(() => openChat(id));
+  }
+  async function loadChats(id: string) {
+    try { chats = (await listChats(id)).chats; }
+    catch (error) { if (error instanceof SignInRequired) throw error; chats = []; }
+  }
+  async function select(id: string, dest = 'index.md', chatId: string | null = null) {
     const data = await loadNotes(id);
     project = id;
     notes = Object.assign(Object.create(null), data.notes);
     filter = '';
-    openNote(dest);
+    chatDraft = '';
+    await loadChats(id);
+    if (chatId && chats.some(c => c.id === chatId)) await openChat(chatId);
+    else openNote(dest);
+  }
+  async function loadAgents() {
+    try {
+      const list = await listAgents();
+      agents = list.agents;
+      agentsEnabled = list.enabled && list.agents.length > 0;
+      agentChoice = list.agents[0]?.id ?? '';
+    } catch (error) {
+      if (error instanceof SignInRequired) throw error;
+      agentsEnabled = false; // An older API without chat.
+    }
   }
   async function load() {
     try {
@@ -68,10 +117,11 @@
       signedOut = Boolean(session?.enabled && !session.authenticated);
       if (signedOut) return;
       projects = (await listProjects()).projects;
+      await loadAgents();
       if (!projects.length) { message = 'Create a project to start your linked notes.'; return; }
       const params = new URLSearchParams(location.search);
       await select(projects.find(p => p.id === params.get('project'))?.id ?? projects[0].id,
-        params.get('note') || 'index.md');
+        params.get('note') || 'index.md', params.get('chat'));
     } catch (error) { retry = true; throw error; }
   }
   async function create() {
@@ -100,6 +150,41 @@
     openNote(path);
     message = 'Saved.';
   }
+  async function newChat() {
+    if (!leave()) return;
+    const created = await createChat(project, agentChoice || agents[0].id);
+    chatDraft = '';
+    showChat(created);
+    await openChat(created.id);
+  }
+  async function send() {
+    const text = chatDraft.trim();
+    if (!chat || !text || waiting) return;
+    // The API saves the message and answers at once; the agent's reply arrives by polling.
+    showChat(await sendMessage(project, chat.id, text));
+    chatDraft = '';
+    message = '';
+  }
+  function composerKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); action(send); }
+  }
+  // Poll while the agent is answering. A new chat object re-arms the timer.
+  $effect(() => {
+    if (!chat || !waiting) return;
+    const proj = project, id = chat.id;
+    void poll;
+    const timer = setTimeout(async () => {
+      try {
+        const fresh = await getChat(proj, id);
+        if (project === proj && chat?.id === id) showChat(fresh);
+      } catch (error) {
+        if (error instanceof SignInRequired) { signedOut = true; return; }
+        message = 'Waiting for the agent; reconnecting…';
+        poll++;
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  });
   onMount(() => {
     const network = () => { offline = !navigator.onLine; };
     const unload = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
@@ -143,6 +228,24 @@
         {#each paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) as p}{@render link(p,p)}{/each}
       </nav>
       <button onclick={newNote}>New note</button>
+      {#if agentsEnabled || chats.length}
+        <h2>Chats</h2>
+        <nav id="chats" aria-label="Project chats">
+          {#each chats as c (c.id)}
+            <a href={chatQuery(c.id)} onclick={(e) => followChat(e, c.id)}
+              aria-current={chat?.id === c.id ? 'page' : undefined}>{c.title || 'New chat'}{c.pending ? ' …' : ''}</a>
+          {:else}<span class="hint">No chats yet.</span>{/each}
+        </nav>
+        {#if agentsEnabled}
+          {#if agents.length > 1}
+            <label for="agent">Agent</label>
+            <select id="agent" bind:value={agentChoice}>
+              {#each agents as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
+            </select>
+          {/if}
+          <button id="new-chat" onclick={() => action(newChat)}>New chat</button>
+        {/if}
+      {/if}
     {/if}
   </aside>
   <section class="page">
@@ -151,7 +254,31 @@
       <p id="signed-out">You are signed out. <button id="sign-in" onclick={signIn}>Sign in</button></p>
     {/if}
     {#if retry}<button id="retry" onclick={() => action(load)}>Retry connection</button>{/if}
-    {#if project}
+    {#if project && chat}
+      <div class="toolbar">
+        <strong id="chat-title">{chat.title || 'New chat'}</strong>
+        <span class="agent">with {agentName(chat.agent)}</span>
+      </div>
+      <ol id="transcript" aria-label="Chat messages" aria-live="polite">
+        {#each chat.messages as m (m.id)}
+          <li class={['msg', m.role, m.status]}>
+            <span class="who">{m.role === 'user' ? 'You' : agentName(chat.agent)}</span>
+            {#if m.status === 'pending'}<p class="working">Agent is working…</p>
+            {:else if m.status === 'failed'}<p class="error">{m.error}{#if m.run} <small>Run {m.run}</small>{/if}</p>
+            {:else}<p class="text">{m.content}</p>{/if}
+          </li>
+        {:else}<li class="hint">Ask {agentName(chat.agent)} something about this project. Each message runs the agent once in a sandbox, without network access or project files.</li>{/each}
+      </ol>
+      {#if agentsEnabled && agents.some(a => a.id === chat?.agent)}
+        <form id="composer" onsubmit={(e) => { e.preventDefault(); action(send); }}>
+          <textarea id="chat-input" aria-label="Message" placeholder="Message the agent… (Ctrl+Enter sends)"
+            bind:value={chatDraft} onkeydown={composerKey}></textarea>
+          <button id="send" disabled={waiting || !chatDraft.trim()}>{waiting ? 'Waiting for answer…' : 'Send'}</button>
+        </form>
+      {:else}
+        <p class="hint">This chat's agent is not available on this Ember instance. The transcript stays readable.</p>
+      {/if}
+    {:else if project}
       <div class="toolbar">
         <strong id="path">{path}</strong>
         {#if editing}

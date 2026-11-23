@@ -3,11 +3,25 @@ export type Notes = Record<string, string | undefined>;
 interface NoteEdit { path: string; content: string; previous: string | null }
 export interface User { subject: string; name?: string; email?: string; groups?: string[] }
 export interface Session { enabled: boolean; authenticated: boolean; user?: User; expiresAt?: string }
+export interface Agent { id: string; name: string }
+export interface AgentList { enabled: boolean; agents: Agent[] }
+export interface ChatMessage {
+  id: string; role: 'user' | 'agent'; content: string; created: string;
+  status?: 'pending' | 'completed' | 'failed'; error?: string; run?: string;
+}
+export interface Chat {
+  schema: string; id: string; title: string; agent: string; created: string; updated: string;
+  messages: ChatMessage[];
+}
+export interface ChatSummary {
+  id: string; title: string; agent: string; created: string; updated: string;
+  messageCount: number; pending: boolean;
+}
 
 /** The API requires an OpenID Connect session (HTTP 401). */
 export class SignInRequired extends Error {}
 
-async function request(url: string, method = 'GET', data?: Project | NoteEdit): Promise<Response> {
+async function request(url: string, method = 'GET', data?: object): Promise<Response> {
   let response;
   try {
     response = await fetch(url, {
@@ -42,6 +56,26 @@ export async function loadNotes(id: string): Promise<{notes: Notes}> {
 }
 export async function saveNote(id: string, edit: NoteEdit): Promise<void> {
   await request(notesUrl(id), 'PUT', edit);
+}
+
+/** Agents the operator registered; chat runs are off when enabled is false. */
+export async function listAgents(): Promise<AgentList> {
+  return (await request('/api/v1/agents')).json();
+}
+const chatsUrl = (id: string) => `${projects}/${encodeURIComponent(id)}/chats`;
+const chatUrl = (id: string, chat: string) => `${chatsUrl(id)}/${encodeURIComponent(chat)}`;
+export async function listChats(id: string): Promise<{chats: ChatSummary[]}> {
+  return (await request(chatsUrl(id))).json();
+}
+export async function createChat(id: string, agent: string): Promise<Chat> {
+  return (await request(chatsUrl(id), 'POST', { agent })).json();
+}
+export async function getChat(id: string, chat: string): Promise<Chat> {
+  return (await request(chatUrl(id, chat))).json();
+}
+/** Saves the message and starts one agent run; poll getChat for the answer. */
+export async function sendMessage(id: string, chat: string, content: string): Promise<Chat> {
+  return (await request(`${chatUrl(id, chat)}/messages`, 'POST', { content })).json();
 }
 
 /** Session state, or null when it cannot be read (offline or an older API). */

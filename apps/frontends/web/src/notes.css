@@ -21,3 +21,15 @@ article pre {overflow:auto;background:#202b36;padding:.5rem}
 #account {float:right;overflow-wrap:anywhere}
 #account button {margin-left:.5rem;padding:.1rem .5rem}
 @media(max-width:42rem){main{grid-template-columns:1fr}}
+/* Project chat */
+.hint,.toolbar .agent,.working,.msg .who {color:#9fb0c0}
+nav a[aria-current] {font-weight:650}
+#transcript {list-style:none;padding:0;margin:1rem 0;display:flex;flex-direction:column;gap:.6rem}
+.msg {padding:.5rem .7rem;border-radius:.4rem;background:#192129;border:1px solid #34404c;max-width:52rem}
+.msg.user {background:#1d2c3b;align-self:flex-end}
+.msg .who {display:block;font-size:.8rem;font-weight:650}
+.msg p {margin:.2rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg .error {color:#ffb4a8}
+.working {font-style:italic}
+#composer {display:flex;flex-direction:column;align-items:flex-end}
+#chat-input {height:6rem}

@@ -316,3 +316,50 @@ The role logs in only when a token is supplied.
 ### Human Decision
 2026-11-22 — Project operator selected **A**: the four `ghcr.io/parityh4sher/ember-*`
 packages are public, so hosts pull them without credentials.
+
+## DEC-009 - Agent chat from the web API
+
+Status: Requested by the project operator on 2026-11-23; design proposed in the
+[project chat plan](project-chat.md); deployment scope pending  
+Priority: High
+
+### Context
+The operator asked for a chat in a project that sends each message to an agent
+running in the sandbox router and shows the answer. Until now the router was
+reachable only by the operator, and DEC-004 enabled no job. Connecting it to the
+web API lets any caller of the chat route start a container on the operator's
+host.
+
+### Options
+A. Keep the router operator-only; agents run only from the command line.
+B. Let the API call the router for operator-registered agents, off by default,
+with sign-in required unless the operator explicitly allows loopback
+development. Agents stay offline until a model route exists.
+C. As B, and also give agents a network route to the model gateway now.
+
+### Comparison
+A keeps today's boundary and gives no chat. B exposes container launches to
+signed-in users but keeps the router's sandbox, limits and offline network.
+C is needed for real model answers, but it puts message text and credentials
+on the path to a provider before DEC-007's gateway is qualified.
+
+### Recommendation
+B now, C as a separate decision once the LiteLLM pilot provides per-agent keys
+and egress limited to the gateway.
+
+### Consequences
+Runs are tied to the API's single router slot and are not durable (DEC-003).
+Roles are not scoped to projects, so any signed-in user can chat in any project.
+Transcripts become project files under `chats/`.
+
+### Dependencies
+DEC-002 (identity), DEC-003 (durable task records), DEC-004 (execution
+placement), DEC-007 (model routing).
+
+### Default Assumption
+No agents configuration file is shipped. Chat runs stay off, and the Compose
+deployment does not mount the router socket.
+
+### Human Decision
+Pending. Approve B (or another option), name who may register agent images, and
+decide whether chat may run on an instance reachable beyond loopback.

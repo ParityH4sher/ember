@@ -448,3 +448,50 @@ printed a "PATH altered" warning, so the script now runs it with the venv on
 
 Not run: a devcontainer rebuild, and ansible-lint over `infra/ansible`, so how
 many findings the extension will now show is unknown.
+
+## Project chat with a sandboxed agent, P0–P7 (2026-11-23)
+
+Plan: [project chat](../planning/project-chat.md). Decision request:
+[DEC-009](../planning/human-decisions.md#dec-009---agent-chat-from-the-web-api).
+Developed on branch `worktree-project-chat` from `8464612`, then rebased onto
+`7e4282b`, which includes the admin and user roles (`021b62f`). `GET /v1/agents` and the four chat
+routes are registered with `auth.RoleUser`.
+
+**What changed.** Contract first (`contracts/openapi.yaml`: `GET /v1/agents`,
+`/v1/projects/{projectId}/chats`, `.../chats/{chatId}`, `.../messages`). New
+`internal/agents` (agents file, `ember.chat-turn/v1` envelope fitted to the
+router's 32 KiB body, Unix-socket router client with fixed user messages),
+`internal/projects/chats.go` (transcripts as `chats/<id>.json` via
+`projectfiles`), `internal/httpapi/chats.go` (asynchronous runs: `202`, one run
+slot, one run per chat, interruption on shutdown and after restart),
+`main.go` (`EMBER_AGENTS_CONFIG_FILE`; refuses to start without sign-in unless
+`allowWithoutSignIn`), a chat panel in the Notes app, and an offline fixture
+agent (`services/sandbox-router/chat-fixture`). CI also runs the fixture's
+Python tests.
+
+**Platform.** Fedora 45, Linux 7.2.11 x86_64, rootless Podman 6.2.0 with
+cgroup v2. No Go on the host: Go ran in
+`golang:1.27.4@sha256:205c7636…126cf` with Podman. Node 26.13.1 on the host.
+Firefox 160.0.1 (Flatpak), headless, driven over Marionette.
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l .`, `go vet ./...`, `go test -race -count=1 ./...` in `apps/api` (container) | Pass. `gofmt` still lists `internal/plugins/weather/weather.go`, which was unformatted before this change and is untouched. |
+| `go vet ./... && go test -race ./...` in `services/sandbox-router` (container) | Pass. Router code unchanged. |
+| After the rebase: `go test -race -count=20 -run TestChat ./internal/httpapi/`, then the full suite | Pass. The first run after the rebase failed once in `TestChatRunFailuresAreSanitized`: a run recorded its answer before giving back the run slot and chat claim, so a send the instant the answer appeared could get `429` or `409`. Runs now give both back while holding the vault lock for that write, and readers check for a run before reading. `TestChatSendRightAfterAnswer` covers it. |
+| Requests without a role (`TestChatRoutesNeedUserRole`) | `403 insufficient_role` on all five routes; no run started, nothing saved. |
+| `python3 -B -m unittest discover -s chat-fixture` and `-s pilot` in `services/sandbox-router` | Pass (4 and existing tests). |
+| `npm ci && npm run check && npm run build` in `apps/frontends/web` | 0 errors, 0 warnings; static build written. |
+| `npm --prefix website ci && npm --prefix website run build` | Pass; `cmp contracts/openapi.yaml website/build/openapi.yaml` identical; DEC-009 anchor present. |
+| Local end to end: fixture image built with Podman, router (`trusted`) on a `0700` socket directory, API binary (`CGO_ENABLED=0`) on `127.0.0.1:8080` with an agents file and `allowWithoutSignIn`, curl | Chat created; send returned `202` with a pending message; router logged `profile=trusted success=true`; answer recorded about 0.26 s later; second turn saw 2 earlier messages; a send during a run got `409`; transcript on disk as indented JSON; no containers left (`podman ps -a --filter label=dev.ember.sandbox-router=v1`). |
+| Same, router stopped | Message recorded as failed with "The sandbox router is not reachable…"; API log line has outcome `router_unavailable` and no message text. |
+| API with an agents file and no `allowWithoutSignIn`, sign-in off | Exits 1 with the sign-in error before listening. A router policy passed as the agents file is rejected (`unknown field`). |
+| `SIGTERM` to the API | `api stopped` logged. |
+| Notes app built, `vite preview` proxying `/api`, headless Firefox via Marionette | Chats listed; **New chat** → message → **Send** showed "Agent is working…" with Send disabled, then the fixture's answer as text; URL became `?project=desk&chat=<id>`. Screenshots checked by eye. |
+
+**Not run.** Sign-in on (OIDC) with chat; the `isolated` (Kata) profile for a
+chat agent; the Compose deployment and installer (they do not mount the router
+socket yet, plan P8); ARM64; an API restart while a real run is in progress
+(covered only by handler tests); any real model, since agents have no network
+(P9). The headless-browser run is a smoke check, not an accessibility or
+cross-browser review.

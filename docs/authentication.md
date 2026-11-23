@@ -61,7 +61,7 @@ from the groups in the ID token:
 | Role | Who | Allowed actions |
 | --- | --- | --- |
 | `admin` | Members of a group listed in `adminGroups` | Everything a user can do, plus configure, activate and deactivate plugins |
-| `user` | Everyone else who may sign in (see `allowedGroups`) | View plugins and their non-secret settings, call operations of active plugins, use projects and notes |
+| `user` | Everyone else who may sign in (see `allowedGroups`) | View plugins and their non-secret settings, call operations of active plugins, use projects, notes and chats |
 
 When `allowedGroups` is set, people in none of the listed groups and in no
 admin group cannot sign in.
