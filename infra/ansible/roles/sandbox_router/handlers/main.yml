@@ -1,0 +1,6 @@
+---
+- name: Update rootless Podman after a subordinate ID change
+  ansible.builtin.command:
+    argv: "{{ sandbox_router_podman + ['system', 'migrate'] }}"
+    chdir: "{{ sandbox_router_home }}"
+  changed_when: true

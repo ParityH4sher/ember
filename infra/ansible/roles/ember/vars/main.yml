@@ -5,7 +5,8 @@ ember_compose_files: >-
   {{ ['compose.yaml']
      + (['compose.registry.yaml'] if ember_from_registry | bool else [])
      + (['compose.oidc.yaml', 'compose.redis.yaml'] if ember_oidc_enabled | bool else [])
-     + (['compose.edge.yaml'] if ember_edge_enabled | bool else []) }}
+     + (['compose.edge.yaml'] if ember_edge_enabled | bool else [])
+     + (['compose.agents.yaml'] if ember_agents_enabled | bool else []) }}
 # Host paths for deploy/compose.oidc.yaml and deploy/compose.redis.yaml, which
 # mount them read-only into the API (and Redis), the images for deploy/compose.registry.yaml, and the routed host for
 # deploy/compose.edge.yaml.
@@ -19,4 +20,8 @@ ember_compose_environment: >-
      | combine({'EMBER_AUTH_CONFIG_FILE': ember_install_dir ~ '/config/auth.json',
                 'EMBER_OIDC_CLIENT_SECRET_FILE': ember_install_dir ~ '/config/oidc-client-secret',
                 'EMBER_REDIS_PASSWORD_FILE': ember_install_dir ~ '/config/redis-password'}
-               if ember_oidc_enabled | bool else {}) }}
+               if ember_oidc_enabled | bool else {})
+     | combine({'EMBER_AGENTS_CONFIG_FILE': ember_install_dir ~ '/config/agents.json',
+                'EMBER_ROUTER_SOCKET_DIR': sandbox_router_socket_dir_fact | default(''),
+                'EMBER_ROUTER_GID': sandbox_router_gid | default('') | string}
+               if ember_agents_enabled | bool else {}) }}

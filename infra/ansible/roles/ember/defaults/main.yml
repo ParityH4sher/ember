@@ -51,6 +51,12 @@ ember_oidc_account_url: ""
 ember_oidc_client_secret: ""
 ember_oidc_client_secret_source: /opt/stacks/authentik/secrets/ember_oidc_client_secret
 
+# Project chat (docs/project-chat.md): run the sandbox router on this host
+# (roles/sandbox_router) and let signed-in users start its agents from the
+# Notes app (deploy/compose.agents.yaml). Requires ember_oidc_enabled. Agents
+# use the router's trusted profile: rootless Podman, sharing the host kernel.
+ember_agents_enabled: false
+
 # With sign-in on, sessions are kept in a Redis container
 # (deploy/compose.redis.yaml, ADR 014). Its password is generated on the host
 # once; supply one from Vault only to set it yourself (letters, digits, - and _).

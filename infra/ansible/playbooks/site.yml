@@ -20,4 +20,7 @@
     - security
     - tailscale
     - container-runtime
+    # Project chat's agent runner, before ember: it records the socket group.
+    - role: sandbox_router
+      when: ember_agents_enabled | default(false) | bool
     - ember

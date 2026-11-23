@@ -72,6 +72,11 @@ ember_oidc_allowed_groups: []
 # Members get Ember's `admin` role: they can also configure and activate
 # plugins. Create this group in Authentik (Directory > Groups) and add yourself.
 ember_oidc_admin_groups: [ember-admins]
+# Project chat (docs/project-chat.md): the sandbox router and its offline
+# fixture agent, trusted profile. Only with sign-in. Every admitted user can
+# start agent containers on this host; narrow ember_oidc_allowed_groups to
+# limit who can.
+ember_agents_enabled: "{{ ember_oidc_enabled }}"
 # Shown by the web app: "Sign in with Authentik", and a link to Authentik's
 # user interface, where people change their password and MFA devices.
 ember_oidc_provider_name: Authentik

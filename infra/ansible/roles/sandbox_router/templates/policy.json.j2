@@ -1,0 +1,9 @@
+{#- Every agent runs with the trusted profile (rootless Podman). -#}
+{% set entries = [] %}
+{% if sandbox_router_fixture | bool and sandbox_router_fixture_id %}
+{% set _ = entries.append(('chat-fixture', {'profile': 'trusted', 'image': 'sha256:' ~ sandbox_router_fixture_id})) %}
+{% endif %}
+{% for agent in sandbox_router_agents %}
+{% set _ = entries.append((agent.id, {'profile': 'trusted', 'image': agent.image})) %}
+{% endfor %}
+{{ dict(entries) | to_nice_json }}

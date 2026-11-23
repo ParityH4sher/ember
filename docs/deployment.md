@@ -94,8 +94,11 @@ Plugin configuration is lost on API restart. Sign-in is optional
 sign-in sessions across API restarts (`deploy/compose.redis.yaml`,
 [session store](authentication.md#session-store)). Its `redis-data` volume
 holds ID tokens: protect it, and leave it out of backups, because losing it
-only signs everyone out. There is no database for application data, task
-execution, or agent behavior. Weather sends coordinates to Open-Meteo; its free API is
+only signs everyone out. Project chat is off by default; with sign-in on,
+`EMBER_AGENTS_CONFIG_FILE` (installer) or `ember_agents_enabled` (Ansible)
+connects the API to a sandbox router on the host (`deploy/compose.agents.yaml`,
+[project chat](project-chat.md#turn-on-chat-in-a-deployment)). There is no
+database for application data, task execution, or agent behavior. Weather sends coordinates to Open-Meteo; its free API is
 non-commercial and requires attribution. Do not expose this prototype to an
 untrusted network or configure real upstream credentials. The Immich plugin
 reads only the server version, the key's user and album metadata; give it a
