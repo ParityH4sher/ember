@@ -5,7 +5,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [sveltekit({
     adapter: adapter(),
-    paths: { base: '/apps/notes', relative: false },
+    // The app owns the site root; Notes is the /apps/notes/ route.
+    paths: { relative: false },
     prerender: { crawl: false }
   })],
   server: { proxy: { '/api': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/api/, '') } } }

@@ -51,9 +51,9 @@ loopback-bound unless you use a private access layer such as Tailscale Serve.
 The Ansible setup installs Tailscale but requires manual device enrollment;
 see the [operations guide](operations/README.md#ansible-host-provisioning).
 
-The `frontend` gateway routes `/` to `home` and `/apps/notes/` to `notes`.
-The two frontend services have separate build contexts and neither needs the
-other to be running.
+The `frontend` gateway routes `/api/` to `api` and every other path to `web`,
+the single browser app: the home page at `/` and Project notes at
+`/apps/notes/`.
 
 The installer accepts decimal ports `1` through `65535` without leading zeros.
 `EMBER_COMPOSE_RUNTIME=podman` or `docker` selects a specific provider; the

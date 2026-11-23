@@ -1,0 +1,11 @@
+/* Shared by every page. Page layouts live in each page's own <style>. */
+:root {color-scheme:dark;font:16px/1.5 system-ui,sans-serif;color:#e6edf3;background:#10151b}
+body {margin:0}
+header {padding:1.2rem;background:#192129;border-bottom:1px solid #34404c}
+h2,label {font-size:1rem;font-weight:650;display:block}
+input,select,textarea,button {font:inherit;color:inherit;border:1px solid #516274;background:#202b36;border-radius:.3rem;padding:.35rem .6rem}
+select,input,textarea {box-sizing:border-box;width:100%;margin:.4rem 0}
+textarea {font:1rem/1.5 ui-monospace,monospace;background:#12191f}
+button,a,summary {cursor:pointer}
+button:disabled {cursor:default;opacity:.6}
+a {color:#94caff}

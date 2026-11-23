@@ -1,8 +1,24 @@
+import type { Schema } from './schema';
+
 export interface Project { id: string; name: string }
 export type Notes = Record<string, string | undefined>;
 interface NoteEdit { path: string; content: string; previous: string | null }
 export interface User { subject: string; name?: string; email?: string; groups?: string[] }
-export interface Session { enabled: boolean; authenticated: boolean; user?: User; expiresAt?: string }
+export interface Session {
+  enabled: boolean; authenticated: boolean; user?: User; role?: 'admin' | 'user'; expiresAt?: string
+}
+export interface Health { status: string; version: string }
+export interface ServiceLink { name: string; url: string }
+export interface Plugin {
+  id: string; name: string; version: string; apiVersion: string; description?: string;
+  active: boolean; configured: boolean; capabilities: string[];
+  configurationSchema: Schema; configuration: Record<string, unknown>
+}
+export interface PluginOperation {
+  operationId: string; name: string; description?: string; method: string; path: string;
+  inputSchema: Schema; outputSchema: Schema
+}
+export interface PluginCatalog { pluginVersion: string; apiVersion: string; operations: PluginOperation[] }
 export interface Agent { id: string; name: string }
 export interface AgentList { enabled: boolean; agents: Agent[] }
 export interface ChatMessage {
@@ -21,18 +37,17 @@ export interface ChatSummary {
 /** The API requires an OpenID Connect session (HTTP 401). */
 export class SignInRequired extends Error {}
 
-async function request(url: string, method = 'GET', data?: object): Promise<Response> {
+async function request(url: string, method = 'GET', data?: unknown,
+  unreachable = 'Cannot reach Ember. Reconnect and try again.'): Promise<Response> {
   let response;
   try {
     response = await fetch(url, {
       method, cache: 'no-store',
-      headers: data && { 'Content-Type': 'application/json' },
-      body: data && JSON.stringify(data)
+      headers: { Accept: 'application/json', ...(data !== undefined && { 'Content-Type': 'application/json' }) },
+      body: data === undefined ? undefined : JSON.stringify(data)
     });
   } catch {
-    throw Error(method === 'PUT'
-      ? 'Not saved. Keep this editor open, reconnect and try Save again.'
-      : 'Cannot reach Ember. Reconnect and try again.');
+    throw Error(unreachable);
   }
   if (response.status === 401) throw new SignInRequired('Sign in to continue.');
   if (!response.ok) {
@@ -41,6 +56,13 @@ async function request(url: string, method = 'GET', data?: object): Promise<Resp
       ? error.message : `Request failed (${response.status})`);
   }
   return response;
+}
+
+export async function getHealth(): Promise<Health> {
+  return (await request('/api/healthz')).json();
+}
+export async function listServices(): Promise<{services: ServiceLink[]}> {
+  return (await request('/api/v1/services')).json();
 }
 
 const projects = '/api/v1/projects';
@@ -55,7 +77,35 @@ export async function loadNotes(id: string): Promise<{notes: Notes}> {
   return (await request(notesUrl(id))).json();
 }
 export async function saveNote(id: string, edit: NoteEdit): Promise<void> {
-  await request(notesUrl(id), 'PUT', edit);
+  await request(notesUrl(id), 'PUT', edit, 'Not saved. Keep this editor open, reconnect and try Save again.');
+}
+
+// Plugins. The browser loads no plugin code: it only renders the schemas the
+// API publishes and calls the API's own routes.
+const pluginUrl = (id: string) => `/api/v1/plugins/${encodeURIComponent(id)}`;
+export async function listPlugins(): Promise<{plugins: Plugin[]}> {
+  return (await request('/api/v1/plugins')).json();
+}
+export async function getPlugin(id: string): Promise<Plugin> {
+  return (await request(pluginUrl(id))).json();
+}
+/** Needs the admin role. Omitted write-only values keep their stored value. */
+export async function configurePlugin(id: string, values: Record<string, unknown>): Promise<void> {
+  await request(`${pluginUrl(id)}/configuration`, 'PUT', { values });
+}
+/** Needs the admin role. */
+export async function setPluginActivation(id: string, active: boolean): Promise<Plugin> {
+  return (await request(`${pluginUrl(id)}/activation`, 'PUT', { active })).json();
+}
+export async function listPluginOperations(id: string): Promise<PluginCatalog> {
+  return (await request(`${pluginUrl(id)}/api`)).json();
+}
+/** The only route an operation may be invoked at; never a catalog-supplied destination. */
+export function operationPath(id: string, apiVersion: string, operationId: string): string {
+  return `${pluginUrl(id)}/api/v${encodeURIComponent(apiVersion)}/${encodeURIComponent(operationId)}`;
+}
+export async function invokeOperation(path: string, input: Record<string, unknown>): Promise<{data?: unknown}> {
+  return (await request(path, 'POST', input)).json();
 }
 
 /** Agents the operator registered; chat runs are off when enabled is false. */

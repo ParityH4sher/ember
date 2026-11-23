@@ -1,0 +1,333 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { beforeNavigate, replaceState } from '$app/navigation';
+  import Account from '../../../lib/Account.svelte';
+  import {
+    createChat, createProject, getChat, getSession, listAgents, listChats, listProjects, loadNotes, saveNote,
+    sendMessage, signInUrl, SignInRequired,
+    type Agent, type Chat, type ChatSummary, type Notes, type Project, type Session
+  } from '../../../lib/api';
+  import { blocks } from '../../../lib/links';
+
+  let projects = $state<Project[]>([]), project = $state(''), path = $state('');
+  let notes = $state.raw<Notes>(Object.create(null));
+  let editing = $state(false), busy = $state(false), offline = $state(false);
+  let draft = $state(''), filter = $state(''), message = $state(''), retry = $state(false);
+  let session = $state.raw<Session | null>(null), signedOut = $state(false);
+  let dirty = $derived(editing && draft !== (notes[path] ?? ''));
+  let paths = $derived(Object.keys(notes).sort());
+  let references = $derived(paths.filter(p => p !== path &&
+    [...blocks(notes[p] ?? '', p, notes)].some(([,parts]) => parts.some(t => t.path === path))));
+
+  // Project chat: each message runs the chat's agent once in the sandbox router.
+  let agents = $state.raw<Agent[]>([]), agentsEnabled = $state(false), agentChoice = $state('');
+  let chats = $state.raw<ChatSummary[]>([]), chat = $state.raw<Chat | null>(null);
+  let chatDraft = $state(''), poll = $state(0);
+  let waiting = $derived(chat?.messages.some(m => m.status === 'pending') ?? false);
+  const agentName = (id: string) => agents.find(a => a.id === id)?.name ?? id;
+
+  const query = (dest: string) => '?' + new URLSearchParams({project, note: dest});
+  const chatQuery = (id: string) => '?' + new URLSearchParams({project, chat: id});
+  const leave = () => !dirty || confirm('Discard unsaved changes?');
+
+  async function action(fn: () => Promise<void>) {
+    if (busy) return;
+    busy = true;
+    try { await fn(); } catch (error) {
+      if (error instanceof SignInRequired) {
+        signedOut = true; retry = false; message = '';
+        session = { enabled: true, authenticated: false };
+      }
+      else message = error instanceof Error ? error.message : String(error);
+    }
+    finally { busy = false; }
+  }
+  // Sign-in and sign-out are full-page navigations through the API. Once the
+  // visitor agrees to discard a draft, close the editor so that leaving does
+  // not ask again.
+  function confirmLeave() {
+    if (!leave()) return false;
+    editing = false;
+    return true;
+  }
+  function signIn() {
+    if (confirmLeave()) location.assign(signInUrl(location.pathname + location.search));
+  }
+  // Covers links to other pages of the app, back/forward, and unloading the
+  // page; for an unload the browser asks with its own dialog.
+  beforeNavigate(({ cancel, type }) => {
+    if (!dirty) return;
+    if (type === 'leave') cancel();
+    else if (!confirm('Discard unsaved changes?')) cancel();
+  });
+  function openNote(dest: string) {
+    chat = null;
+    path = dest;
+    replaceState(query(dest), {});
+    editing = !Object.hasOwn(notes, path);
+    draft = notes[path] ?? '';
+    message = '';
+  }
+  function follow(e: MouseEvent, dest: string) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (leave()) openNote(dest);
+  }
+  const summary = (c: Chat): ChatSummary => ({
+    id: c.id, title: c.title, agent: c.agent, created: c.created, updated: c.updated,
+    messageCount: c.messages.length, pending: c.messages.some(m => m.status === 'pending')
+  });
+  function showChat(c: Chat) {
+    chat = c;
+    chats = [summary(c), ...chats.filter(s => s.id !== c.id)];
+  }
+  async function openChat(id: string) {
+    const loaded = await getChat(project, id);
+    editing = false;
+    path = '';
+    replaceState(chatQuery(id), {});
+    message = '';
+    chat = loaded;
+  }
+  function followChat(e: MouseEvent, id: string) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (leave()) action(() => openChat(id));
+  }
+  async function loadChats(id: string) {
+    try { chats = (await listChats(id)).chats; }
+    catch (error) { if (error instanceof SignInRequired) throw error; chats = []; }
+  }
+  async function select(id: string, dest = 'index.md', chatId: string | null = null) {
+    const data = await loadNotes(id);
+    project = id;
+    notes = Object.assign(Object.create(null), data.notes);
+    filter = '';
+    chatDraft = '';
+    await loadChats(id);
+    if (chatId && chats.some(c => c.id === chatId)) await openChat(chatId);
+    else openNote(dest);
+  }
+  async function loadAgents() {
+    try {
+      const list = await listAgents();
+      agents = list.agents;
+      agentsEnabled = list.enabled && list.agents.length > 0;
+      agentChoice = list.agents[0]?.id ?? '';
+    } catch (error) {
+      if (error instanceof SignInRequired) throw error;
+      agentsEnabled = false; // An older API without chat.
+    }
+  }
+  async function load() {
+    try {
+      retry = false;
+      session = await getSession();
+      signedOut = Boolean(session?.enabled && !session.authenticated);
+      if (signedOut) return;
+      projects = (await listProjects()).projects;
+      await loadAgents();
+      if (!projects.length) { message = 'Create a project to start your linked notes.'; return; }
+      const params = new URLSearchParams(location.search);
+      await select(projects.find(p => p.id === params.get('project'))?.id ?? projects[0].id,
+        params.get('note') || 'index.md', params.get('chat'));
+    } catch (error) { retry = true; throw error; }
+  }
+  async function create() {
+    if (!leave()) return;
+    const name = prompt('Project name:')?.trim();
+    if (!name) return;
+    const id = prompt('Project ID:', name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,64))?.trim();
+    if (!id) return;
+    const p = await createProject({ id, name });
+    projects = [...projects, p];
+    await select(p.id);
+  }
+  function newNote() {
+    if (!leave()) return;
+    let p = prompt('Note path, e.g. decisions/material.md')?.trim();
+    if (!p) return;
+    if (!p.endsWith('.md')) p += '.md';
+    if (p.split('/').some(s => !s || s.startsWith('.') || /[\\:\x00-\x1f]/.test(s))) {
+      message = 'Use a relative Markdown path.'; return;
+    }
+    openNote(p);
+  }
+  async function save() {
+    await saveNote(project, {path, content: draft, previous: notes[path] ?? null});
+    notes = Object.assign(Object.create(null), notes, {[path]: draft});
+    openNote(path);
+    message = 'Saved.';
+  }
+  async function newChat() {
+    if (!leave()) return;
+    const created = await createChat(project, agentChoice || agents[0].id);
+    chatDraft = '';
+    showChat(created);
+    await openChat(created.id);
+  }
+  async function send() {
+    const text = chatDraft.trim();
+    if (!chat || !text || waiting) return;
+    // The API saves the message and answers at once; the agent's reply arrives by polling.
+    showChat(await sendMessage(project, chat.id, text));
+    chatDraft = '';
+    message = '';
+  }
+  function composerKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); action(send); }
+  }
+  // Poll while the agent is answering. A new chat object re-arms the timer.
+  $effect(() => {
+    if (!chat || !waiting) return;
+    const proj = project, id = chat.id;
+    void poll;
+    const timer = setTimeout(async () => {
+      try {
+        const fresh = await getChat(proj, id);
+        if (project === proj && chat?.id === id) showChat(fresh);
+      } catch (error) {
+        if (error instanceof SignInRequired) { signedOut = true; return; }
+        message = 'Waiting for the agent; reconnecting…';
+        poll++;
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  });
+  onMount(() => {
+    const network = () => { offline = !navigator.onLine; };
+    network();
+    window.addEventListener('online', network);
+    window.addEventListener('offline', network);
+    action(load);
+    return () => {
+      window.removeEventListener('online', network);
+      window.removeEventListener('offline', network);
+    };
+  });
+</script>
+
+<svelte:head><title>Project notes · Ember</title></svelte:head>
+{#snippet link(label: string, dest: string)}
+  <a href={query(dest)} onclick={(e) => follow(e, dest)}>{label}</a>
+{/snippet}
+<header><a href="/">Ember</a> / Project notes <Account {session} {confirmLeave} /></header>
+{#if offline}<p id="offline" role="status">Offline. Browse notes already loaded in this window. Reconnect to load projects or save edits.</p>{/if}
+<main inert={busy}>
+  <aside>
+    <label for="project">Project</label>
+    <select id="project" value={project} onchange={e => {
+      const id = e.currentTarget.value; e.currentTarget.value = project;
+      if (leave()) action(() => select(id));
+    }}>
+      {#each projects as p (p.id)}<option value={p.id} selected={project === p.id}>{p.name} ({p.id})</option>{/each}
+    </select>
+    <button id="create" onclick={() => action(create)}>Create project</button>
+    {#if project}
+      <h2>Notes</h2><input type="search" aria-label="Find a note" placeholder="Find a note…" bind:value={filter}>
+      <nav aria-label="Project notes">
+        {#each paths.filter(p => p.toLowerCase().includes(filter.toLowerCase())) as p}{@render link(p,p)}{/each}
+      </nav>
+      <button onclick={newNote}>New note</button>
+      {#if agentsEnabled || chats.length}
+        <h2>Chats</h2>
+        <nav id="chats" aria-label="Project chats">
+          {#each chats as c (c.id)}
+            <a href={chatQuery(c.id)} onclick={(e) => followChat(e, c.id)}
+              aria-current={chat?.id === c.id ? 'page' : undefined}>{c.title || 'New chat'}{c.pending ? ' …' : ''}</a>
+          {:else}<span class="hint">No chats yet.</span>{/each}
+        </nav>
+        {#if agentsEnabled}
+          {#if agents.length > 1}
+            <label for="agent">Agent</label>
+            <select id="agent" bind:value={agentChoice}>
+              {#each agents as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
+            </select>
+          {/if}
+          <button id="new-chat" onclick={() => action(newChat)}>New chat</button>
+        {/if}
+      {/if}
+    {/if}
+  </aside>
+  <section class="page">
+    <p id="message" role="status">{message}</p>
+    {#if signedOut}
+      <p id="signed-out">You are signed out. <button id="sign-in" onclick={signIn}>Sign in</button></p>
+    {/if}
+    {#if retry}<button id="retry" onclick={() => action(load)}>Retry connection</button>{/if}
+    {#if project && chat}
+      <div class="toolbar">
+        <strong id="chat-title">{chat.title || 'New chat'}</strong>
+        <span class="agent">with {agentName(chat.agent)}</span>
+      </div>
+      <ol id="transcript" aria-label="Chat messages" aria-live="polite">
+        {#each chat.messages as m (m.id)}
+          <li class={['msg', m.role, m.status]}>
+            <span class="who">{m.role === 'user' ? 'You' : agentName(chat.agent)}</span>
+            {#if m.status === 'pending'}<p class="working">Agent is working…</p>
+            {:else if m.status === 'failed'}<p class="error">{m.error}{#if m.run} <small>Run {m.run}</small>{/if}</p>
+            {:else}<p class="text">{m.content}</p>{/if}
+          </li>
+        {:else}<li class="hint">Ask {agentName(chat.agent)} something about this project. Each message runs the agent once in a sandbox, without network access or project files.</li>{/each}
+      </ol>
+      {#if agentsEnabled && agents.some(a => a.id === chat?.agent)}
+        <form id="composer" onsubmit={(e) => { e.preventDefault(); action(send); }}>
+          <textarea id="chat-input" aria-label="Message" placeholder="Message the agent… (Ctrl+Enter sends)"
+            bind:value={chatDraft} onkeydown={composerKey}></textarea>
+          <button id="send" disabled={waiting || !chatDraft.trim()}>{waiting ? 'Waiting for answer…' : 'Send'}</button>
+        </form>
+      {:else}
+        <p class="hint">This chat's agent is not available on this Ember instance. The transcript stays readable.</p>
+      {/if}
+    {:else if project}
+      <div class="toolbar">
+        <strong id="path">{path}</strong>
+        {#if editing}
+          <button id="save" onclick={() => action(save)}>Save</button>
+          <button onclick={() => { if (leave()) openNote(Object.hasOwn(notes,path) ? path : 'index.md'); }}>Cancel</button>
+        {:else}<button id="edit" onclick={() => { draft = notes[path] ?? ''; editing = true; }}>Edit</button>{/if}
+      </div>
+      {#if editing}
+        <textarea id="editor" aria-label="Markdown source" bind:value={draft}></textarea>
+      {:else}
+        <article id="preview">
+          {#each [...blocks(notes[path] ?? '', path, notes)] as [tag, parts]}
+            <svelte:element this={tag}>{#each parts as part}{#if part.path}{@render link(part.text,part.path)}{:else}{part.text}{/if}{/each}</svelte:element>
+          {/each}
+        </article>
+      {/if}
+      <h2>Backlinks</h2><nav id="backlinks" aria-label="Notes linking here">
+        {#each references as ref}{@render link(ref, ref)}{:else}No notes link here yet.{/each}
+      </nav>
+    {/if}
+  </section>
+</main>
+
+<style>
+  aside,.page {padding:1.2rem}
+  #offline {margin:0;padding:.6rem 1.2rem;background:#453817}
+  .toolbar,aside {background:#192129;border-bottom:1px solid #34404c}
+  main {display:grid;grid-template-columns:minmax(14rem,22rem) 1fr;max-width:80rem;margin:auto}
+  aside {align-self:start;border-radius:.4rem}
+  textarea {height:55vh}
+  nav a {display:block;overflow-wrap:anywhere;padding:.15rem 0}
+  .toolbar {display:flex;align-items:center;gap:.5rem;padding:.5rem}
+  .toolbar strong {margin-right:auto;overflow-wrap:anywhere}
+  .page {min-width:0}
+  article {min-height:10rem;white-space:pre-wrap;overflow-wrap:anywhere}
+  article :global(pre) {overflow:auto;background:#202b36;padding:.5rem}
+  #message:empty {display:none}
+  @media(max-width:42rem){main{grid-template-columns:1fr}}
+  /* Project chat */
+  .hint,.toolbar .agent,.working,.msg .who {color:#9fb0c0}
+  nav a[aria-current] {font-weight:650}
+  #transcript {list-style:none;padding:0;margin:1rem 0;display:flex;flex-direction:column;gap:.6rem}
+  .msg {padding:.5rem .7rem;border-radius:.4rem;background:#192129;border:1px solid #34404c;max-width:52rem}
+  .msg.user {background:#1d2c3b;align-self:flex-end}
+  .msg .who {display:block;font-size:.8rem;font-weight:650}
+  .msg p {margin:.2rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+  .msg .error {color:#ffb4a8}
+  .working {font-style:italic}
+  #composer {display:flex;flex-direction:column;align-items:flex-end}
+  #chat-input {height:6rem}
+</style>

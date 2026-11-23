@@ -22,13 +22,13 @@ cd "$name"
 docker compose -f deploy/compose.yaml config --format json | python3 -c '
 import json, pathlib, sys
 services = json.load(sys.stdin)["services"]
-for name, directory in (("api", "apps/api"), ("home", "apps/frontends/home"),
-                        ("notes", "apps/frontends/web"), ("frontend", "deploy/gateway")):
+assert sorted(services) == ["api", "frontend", "web"], sorted(services)
+for name, directory in (("api", "apps/api"), ("web", "apps/frontends/web"), ("frontend", "deploy/gateway")):
     build = services[name]["build"]
     context = pathlib.Path(build["context"])
     assert context.resolve() == (pathlib.Path.cwd()/directory).resolve()
     assert (context/build.get("dockerfile", "Dockerfile")).is_file()
-assert all(not services[s].get("ports") for s in ("api", "home", "notes"))
+assert all(not services[s].get("ports") for s in ("api", "web"))
 assert [p["host_ip"] for p in services["frontend"]["ports"]] == ["127.0.0.1"]
 '
 export COMPOSE_PROJECT_NAME="$project"
@@ -50,13 +50,16 @@ assert expected and json.load(sys.stdin) == {"status": "ok", "version": expected
 }
 health
 base="http://127.0.0.1:$EMBER_HTTP_PORT"
-docker compose -f deploy/compose.yaml stop home
-curl --noproxy '*' --fail --silent --show-error "http://127.0.0.1:$EMBER_HTTP_PORT/apps/notes/manifest.webmanifest" |
-  python3 -c 'import json, sys; assert json.load(sys.stdin)["display"] == "standalone"'
-docker compose -f deploy/compose.yaml start home
-docker compose -f deploy/compose.yaml stop notes
+# One web app serves the home page, Notes, the manifest and the service workers.
 curl --noproxy '*' -fsS --retry 10 --retry-all-errors --retry-delay 1 "$base/" |
   grep -F '<title>Ember</title>'
+curl --noproxy '*' -fsS "$base/apps/notes/" | grep -oF '<title>Project notes'
+test "$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$base/apps/notes?project=p")" \
+  = "308 $base/apps/notes/?project=p"
+curl --noproxy '*' -fsS "$base/manifest.webmanifest" |
+  python3 -c 'import json, sys; m = json.load(sys.stdin); assert m["display"] == "standalone" and m["start_url"] == "./apps/notes/"'
+curl --noproxy '*' -fsS "$base/service-worker.js" > /dev/null
+curl --noproxy '*' -fsS "$base/apps/notes/service-worker.js" | grep -oF 'registration.unregister()'
 # A service name survives replacement; a cached container IP may not.
 docker compose -f deploy/compose.yaml up -d --no-build --no-deps --force-recreate api
 health

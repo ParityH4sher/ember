@@ -36,11 +36,12 @@ flowchart TB
   it there is no authentication. The Weather plugin proxies one
   fixed operation to Open-Meteo; the bundled Immich entry stores configuration
   only and does not call Immich.
-- `apps/frontends`: the status page (`home/`) and SvelteKit linked Markdown PWA
-  (`web/`) build and run independently.
-- `deploy/compose.yaml`: runs the API, both frontends, and a gateway on one host.
-  The gateway proxies `/`, `/apps/notes/`, and `/api/` and is
-  published on loopback by default at `http://127.0.0.1:3000`.
+- `apps/frontends/web`: the single browser frontend, an installable SvelteKit
+  app with the home page (status, service links, plugins) at `/` and linked
+  Markdown project notes at `/apps/notes/`.
+- `deploy/compose.yaml`: runs the API, the web frontend, and a gateway on one
+  host. The gateway proxies `/api/` to the API and everything else to the
+  frontend, and is published on loopback by default at `http://127.0.0.1:3000`.
 - `infra/ansible`: initial Debian/Ubuntu host preparation and Compose deployment.
   It installs Tailscale; an already-enrolled device gets a private Serve route,
   and first-time enrollment can use an auth key supplied through Ansible Vault.

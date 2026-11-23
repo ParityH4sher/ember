@@ -317,6 +317,10 @@ The role logs in only when a token is supplied.
 2026-11-22 — Project operator selected **A**: the four `ghcr.io/parityh4sher/ember-*`
 packages are public, so hosts pull them without credentials.
 
+2026-11-23 — [ADR 013](../decisions/013-single-web-frontend.md) replaces
+`ember-home` and `ember-notes` with a new `ember-web` package. Under this
+decision it must be made public after its first publish.
+
 ## DEC-009 - Agent chat from the web API
 
 Status: Requested by the project operator on 2026-11-23; design proposed in the

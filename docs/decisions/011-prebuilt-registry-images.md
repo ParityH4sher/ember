@@ -5,6 +5,11 @@ Date: 2026-11-22
 Scope: how the Ansible `ember` role obtains Ember's four images. The source
 bundle and `deploy/install.sh` still build on the host.
 
+*Amended by [ADR 013](013-single-web-frontend.md) on 2026-11-23: the `home` and
+`notes` frontends became one `web` service, so CI now publishes three images
+(`ember-api`, `ember-web`, `ember-gateway`). The text below describes the four
+images of that time.*
+
 **Problem.** The Ansible role copied the source to the Pi and built all four
 images there. Every deploy ran `npm ci`, the Svelte check and the Go build on
 the target, needed npm, the Go proxy and Docker Hub at deploy time, and could

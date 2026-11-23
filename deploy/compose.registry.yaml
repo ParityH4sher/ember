@@ -13,12 +13,8 @@ services:
     image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-api:${EMBER_IMAGE_TAG:-latest}
     build: !reset null
 
-  home:
-    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-home:${EMBER_IMAGE_TAG:-latest}
-    build: !reset null
-
-  notes:
-    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-notes:${EMBER_IMAGE_TAG:-latest}
+  web:
+    image: ${EMBER_IMAGE_REGISTRY:?set EMBER_IMAGE_REGISTRY, for example ghcr.io/<owner>}/ember-web:${EMBER_IMAGE_TAG:-latest}
     build: !reset null
 
   frontend:

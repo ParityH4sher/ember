@@ -82,8 +82,8 @@ admin group cannot sign in.
   restart the API, which signs everyone out.
 - **With sign-in off there are no identities, so every caller is an admin.**
   This is one more reason to keep an API without sign-in on loopback.
-- The API enforces roles. The home page only hides the settings and activation
-  controls from users. `GET /api/v1/auth/session` reports the signed-in
+- The API enforces roles. The home page (`/`) only hides the plugin settings
+  and activation controls from users. `GET /api/v1/auth/session` reports the signed-in
   person's `role`.
 
 ## Configuration

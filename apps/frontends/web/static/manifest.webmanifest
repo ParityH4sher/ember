@@ -1,9 +1,9 @@
 {
   "id": "./",
-  "name": "Ember Project Notes",
-  "short_name": "Ember Notes",
-  "description": "Read, link, and edit Markdown notes in your Ember projects.",
-  "start_url": "./",
+  "name": "Ember",
+  "short_name": "Ember",
+  "description": "Your self-hosted Ember workspace: linked Markdown project notes, plugins and shared services.",
+  "start_url": "./apps/notes/",
   "scope": "./",
   "display": "standalone",
   "background_color": "#10151b",

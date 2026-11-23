@@ -3,10 +3,13 @@ import { version } from '$app/env';
 
 declare const self: ServiceWorkerGlobalScope;
 
-const prefix = `ember-notes:${self.registration.scope}:`;
+const prefix = `ember:${self.registration.scope}:`;
 const cacheName = prefix + version;
-const shell = new Set([...immutable, ...assets, ...prerendered].map(({path}) =>
-  new URL(path.replace(/^\//, ''), self.registration.scope).pathname));
+const pathname = (path: string) => new URL(path.replace(/^\//, ''), self.registration.scope).pathname;
+// static/apps/notes/service-worker.js retires an older worker; it is not part of the shell.
+const retired = pathname('apps/notes/service-worker.js');
+const shell = new Set([...immutable, ...assets, ...prerendered].map(({path}) => pathname(path))
+  .filter(path => path !== retired));
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(cacheName).then(cache =>

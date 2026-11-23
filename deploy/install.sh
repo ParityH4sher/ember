@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -f deploy/compose.yaml || ! -f deploy/gateway/Dockerfile || ! -f apps/api/Dockerfile || ! -f apps/frontends/home/Dockerfile || ! -f apps/frontends/web/Dockerfile ]]; then
+if [[ ! -f deploy/compose.yaml || ! -f deploy/gateway/Dockerfile || ! -f apps/api/Dockerfile || ! -f apps/frontends/web/Dockerfile ]]; then
   echo "Run install.sh from the extracted Ember Compose bundle directory." >&2
   exit 1
 fi
@@ -40,7 +40,9 @@ elif (( $# )); then
   exit 2
 fi
 
-"${compose[@]}" up --build -d
+# --remove-orphans stops services that this version no longer defines, such as
+# the separate home and notes frontends of earlier bundles.
+"${compose[@]}" up --build -d --remove-orphans
 # Check the real Nginx-to-API path; no shell or HTTP client is required in the
 # distroless API image. A failing stack remains available for scoped diagnostics.
 ready=false

@@ -54,12 +54,12 @@ target. If SSH or privilege escalation credentials are prompted for, add
 
 | Value | Behavior |
 | --- | --- |
-| `build` (role default) | Copies the source to the host and builds the four images there, rebuilding only when the inputs change. |
+| `build` (role default) | Copies the source to the host and builds the three images there, rebuilding only when the inputs change. |
 | `registry` (homelab inventory) | Installs only the Compose manifests and runs the images that CI publishes, through `deploy/compose.registry.yaml`. Every run pulls `ember_image_tag` again and replaces only the containers whose image changed. |
 
 For every push to `main` that passes the tests, the `images` job in
 `.github/workflows/build.yml` publishes `ghcr.io/<owner>/ember-api`,
-`ember-home`, `ember-notes` and `ember-gateway` for amd64 and arm64. They are
+`ember-web` and `ember-gateway` for amd64 and arm64. They are
 tagged `sha-<full commit>`, and `latest` moves to the newest build. Only
 committed and pushed source is published.
 
@@ -117,9 +117,11 @@ Serve without an auth key. Without a Vault key, the playbook reports the single
 manual `sudo tailscale up` enrollment step and configures Serve on the next run.
 The Serve route stays tailnet-only; do not enable Funnel for this use.
 
-The gateway routes `/` to the `home` service and `/apps/notes/` to the `notes`
-service. In `build` mode, Ansible stages their separate build contexts from
-`apps/frontends/home/` and `apps/frontends/web/`.
+The gateway routes `/api/` to the API and every other path to the `web`
+service, the single browser app. In `build` mode, Ansible stages its build
+context from `apps/frontends/web/`. Each run removes containers of services that
+`deploy/compose.yaml` no longer defines, such as the `home` and `notes`
+frontends of earlier versions, and the staged `apps/frontends/home/`.
 
 ## Shared service stacks
 

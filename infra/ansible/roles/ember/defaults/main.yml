@@ -11,7 +11,7 @@ ember_project_name: ember
 #             again, so `latest` deploys the newest build of main.
 ember_image_source: build
 # Registry namespace of the images, such as ghcr.io/<owner>. The images are
-# <namespace>/ember-api, ember-home, ember-notes and ember-gateway.
+# <namespace>/ember-api, ember-web and ember-gateway.
 ember_image_registry: ""
 # `latest` (the newest build of main) or `sha-<full commit>` to pin a version.
 ember_image_tag: latest

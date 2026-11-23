@@ -85,9 +85,8 @@ remains bound to loopback. To remove the Serve route, run
 Serve does not add application authentication. Ensure tailnet ACLs restrict
 access to trusted devices and users; the Ember API itself remains unauthenticated.
 
-To redeploy one frontend, run `docker compose -f deploy/compose.yaml up -d
---build home` or use `notes` instead. Both use the existing Serve route; the
-gateway forwards each path to its own container.
+To redeploy only the frontend, run `docker compose -f deploy/compose.yaml up -d
+--build web`. It uses the existing Serve route.
 
 ## GitHub Actions bundle
 

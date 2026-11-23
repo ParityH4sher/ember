@@ -61,7 +61,7 @@
         group: root
         mode: preserve
 
-    - name: Copy independent frontend build inputs
+    - name: Copy web frontend build inputs
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../../apps/frontends/{{ item }}"
         dest: "{{ ember_install_dir }}/apps/frontends/{{ item }}"
@@ -69,7 +69,6 @@
         group: root
         mode: preserve
       loop:
-        - home/
         - web/src/
         - web/static/
         - web/package.json
@@ -105,6 +104,12 @@
         owner: root
         group: root
         mode: preserve
+
+# Earlier versions staged a separate home page frontend.
+- name: Remove the retired home frontend's build inputs
+  ansible.builtin.file:
+    path: "{{ ember_install_dir }}/apps/frontends/home"
+    state: absent
 
 - name: Install Compose manifests
   ansible.builtin.copy:
@@ -234,7 +239,6 @@
   ansible.builtin.find:
     paths:
       - "{{ ember_install_dir }}/apps/api"
-      - "{{ ember_install_dir }}/apps/frontends/home"
       - "{{ ember_install_dir }}/apps/frontends/web"
       - "{{ ember_install_dir }}/deploy"
     recurse: true
@@ -267,6 +271,9 @@
       {{ 'never' if ember_from_registry | bool
          else ('always' if ember_build_needed.changed else 'policy') }}
     pull: "{{ 'always' if ember_from_registry | bool else 'policy' }}"
+    # Stops services that compose.yaml no longer defines, such as the separate
+    # home and notes frontends of earlier versions.
+    remove_orphans: true
     wait: true
     wait_timeout: 90
   environment: "{{ ember_compose_environment }}"

@@ -11,7 +11,7 @@ that planned services already ship in the installer.
 
 ## What the current installation needs
 
-The current Compose installation runs four services:
+The current Compose installation runs three services:
 
 - **API** (`apps/api`): Go HTTP service with health, project, Markdown note,
   and plugin-configuration endpoints. Projects and notes survive restarts in the
@@ -19,10 +19,11 @@ The current Compose installation runs four services:
   Sign-in is optional [OpenID Connect](authentication.md) and is off by
   default. Without it the API has no authentication; do not expose it to an
   untrusted network or configure real service credentials.
-- **Home** (`apps/frontends/home`): static status page.
-- **Notes** (`apps/frontends/web`): installable linked-note editor.
-- **Gateway** (`deploy/gateway`, Compose service `frontend`): routes `/` to
-  Home, `/apps/notes/` to Notes and `/api/` to the API.
+- **Web** (`apps/frontends/web`): the installable browser app. Its home page
+  (`/`) shows API status, shared service links and plugin forms; Project notes
+  (`/apps/notes/`) is the linked-note editor.
+- **Gateway** (`deploy/gateway`, Compose service `frontend`): routes `/api/` to
+  the API and every other path to Web.
 
 The required host dependency is either Docker Engine with Compose v2 or Podman
 with a working Compose provider. The host needs network access to fetch base

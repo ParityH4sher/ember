@@ -42,7 +42,7 @@ It maps the host user to the container's `node` user with Podman's `keep-id`
 namespace. The workspace mount supports shared SELinux labeling. Port 3000 is
 published on host loopback and configured for editor forwarding. The notes
 client uses its own loopback port, 5173. Run the VS Code task **Ember web:
-start** to start Vite and its Go API, then open `http://localhost:5173/apps/notes/`.
+start** to start Vite and its Go API, then open `http://localhost:5173/`.
 Container creation installs the web toolchain from `apps/frontends/web/package-lock.json`
 and runs `svelte-check` and the worker type check. The web and docs dependencies
 live in container volumes separate from host `node_modules`.
