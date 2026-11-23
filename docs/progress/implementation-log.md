@@ -593,3 +593,38 @@ draft guard on client-side navigation, and the retirement of an installed
 Notes service worker were not exercised. Neither were the GitHub `images`
 job, a registry-mode deploy (the new `ember-web` package must be made public
 first, DEC-008), or `site.yml` against a host.
+
+## Sticky `/tmp` in the devcontainer (2026-11-23)
+
+**Problem (user report):** Claude Code in the devcontainer warned
+"Cross-session messaging is off: … '/tmp' is world-writable without the sticky
+bit (owner 0:0, mode 0777)". Sessions still worked, but they could not find
+or message each other.
+
+**Cause:**
+
+- `/tmp` is `1777` in the base image
+  (`mcr.microsoft.com/devcontainers/javascript-node:24-bookworm`) and in the
+  first feature layers that the Dev Container CLI adds.
+- It is `0777` in the built `vsc-ember-…` image and in the running container.
+  One of the `python`, `go` or `github-cli` feature install steps clears the
+  sticky bit. Those intermediate layers are not kept locally, and the feature
+  scripts at the locked digests contain no `chmod` of `/tmp`, so the step was
+  not pinned down.
+- A `RUN --mount=type=bind` at `/tmp/build-features-src/…`, from the build
+  context or from another stage, did not reproduce it under Podman 6.2.0.
+
+**Change:** `.devcontainer/setup.sh` (`postCreateCommand`) runs
+`sudo chmod 1777 /tmp` first. A `chmod` in the `Containerfile` would run
+before the features.
+
+Verification (Fedora 45 x86_64, rootless Podman 6.2.0, Claude Code 2.1.323):
+
+| Check | Result |
+| --- | --- |
+| Interactive `claude --debug-file …` in a throwaway container, `/tmp` at `0777` | Screen and debug log show the sticky-bit refusal; "cross-session messaging is OFF for this session". |
+| Same with `/tmp` at `1777` | No warning. |
+| `bash -n .devcontainer/setup.sh`; the new line run as `node` (sudo) on a `0777` `/tmp` | Syntax OK; `/tmp` became `1777`. |
+
+Not run: a devcontainer rebuild with the Dev Container CLI, and messaging
+between two live sessions.
