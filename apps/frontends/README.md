@@ -1,7 +1,7 @@
 # Ember frontends
 
-`web/` is the installable SvelteKit + Vite Project Notes client, written in TypeScript. `desktop/`
-is reserved for a native client. `home/` is the standalone static status page.
+`web/` is the installable SvelteKit + Vite Project Notes client, written in TypeScript.
+`home/` is the standalone static status page.
 The shared gateway routes `/` to `home`, `/apps/notes/` to `notes`, and `/api/` to Ember. From the Ember root,
 run `docker compose -f deploy/compose.yaml up --build -d`, visit
 `http://127.0.0.1:3000/apps/notes/`, and use the browser's install action
