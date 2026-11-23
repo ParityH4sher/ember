@@ -9,3 +9,5 @@ website/*.log
 /apps/frontends/web/build/
 # Operator secrets (see .env.example). Never commit them, at any depth.
 .env
+# Agent git worktrees (Claude Code creates them under .claude/worktrees/).
+/.claude/worktrees/
