@@ -121,6 +121,8 @@
             print("claimed" if u is not None and u.has_usable_password() else "unclaimed")
       register: authentik_admin_state
       changed_when: false
+      # Read-only; the assertion below needs its real answer in check mode too.
+      check_mode: false
       when:
         - ingress_enabled | bool
         - "'authentik' in shared_stack_names"

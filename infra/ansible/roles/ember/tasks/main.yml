@@ -136,6 +136,7 @@
         argv: [docker, compose, version, --short]
       register: ember_compose_version
       changed_when: false
+      check_mode: false  # read-only; the assertion below needs it in check mode
 
     # compose.registry.yaml removes the build sections with `!reset`.
     - name: Require Docker Compose 2.24.4 or newer for the registry overlay

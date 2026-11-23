@@ -16,6 +16,8 @@
   register: ingress_network_state
   changed_when: false
   failed_when: false
+  # Read-only; the tasks below need its real output in check mode too.
+  check_mode: false
 
 - name: Create missing ingress networks
   ansible.builtin.command:
