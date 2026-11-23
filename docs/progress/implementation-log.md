@@ -541,3 +541,55 @@ image `mcr.microsoft.com/devcontainers/javascript-node:24-bookworm` (npm
 full `postCreateCommand` and the VS Code extension install. The user's own
 devcontainer held ports 3000 and 5173. Also not run: an arm64 build, an
 interactive `claude` sign-in, and a self-update inside the container.
+
+## One web frontend (2026-11-23)
+
+**Change (operator request):** Ember supports one frontend for now, the
+SvelteKit app. `apps/frontends/home` is removed and its logic moved into
+`apps/frontends/web`, which now owns the site root: the home page at `/`,
+Project notes at `/apps/notes/` ([ADR 013](../decisions/013-single-web-frontend.md)).
+One Compose service and image, `web`/`ember-web`, replaces `home` and `notes`.
+The gateway now sets `absolute_redirect off`: before, the `/apps/notes`
+redirect was absolute and named the container's port 8080. `install.sh` and
+the `ember` role remove orphaned containers.
+
+The change was rebased onto project chat (`3539847`). Its chat UI moved with
+Notes to `routes/apps/notes/+page.svelte`, and the chat rules from `notes.css`
+into that page's scoped styles. After the rebase, `npm run check` (0 errors,
+0 warnings), `npm run build`, the bundle smoke test and the docs build passed
+again; the other checks below ran before the rebase.
+
+Verification (Fedora host, Node 26.13.1, Docker Compose 5.8.0):
+
+- `npm ci && npm run check && npm run build` in `apps/frontends/web`:
+  svelte-check 0 errors and 0 warnings; the build prerenders `/` and
+  `/apps/notes/`.
+- `bash deploy/build-bundle.sh DIR` then `bash deploy/test-bundle.sh` on the
+  archive of the committed change: exit 0. Through the gateway: `/` and
+  `/apps/notes/` titles, `308` from `/apps/notes?project=p` to
+  `/apps/notes/?project=p` on the published port, the manifest, both service
+  workers, and health before and after recreating the API.
+- A plain `nginx:1.30.7-alpine` with the old `return 308` location sent
+  `Location: http://127.0.0.1:8080/apps/notes/?project=p` from a different
+  published port; with `absolute_redirect off`, `/apps/notes/?project=p`.
+- Upgrade: the `7e4282b` stack (`api`, `home`, `notes`, `frontend`) ran with a
+  project created through the API; `bash deploy/install.sh` from the new
+  source, with the same project name, removed `home` and `notes`, started
+  `web`, and the project was still listed.
+- `PluginCard.svelte` and `SchemaFields.svelte` were server-rendered (Vite
+  `ssrLoadModule`, `svelte/server`) with the Immich and Weather plugins and
+  catalogs returned by the running API. Controls, `required`, the write-only
+  placeholder, number limits and the user-role notice matched the removed
+  `integrations.js`. `readFields` ran on stand-in controls; its Immich payloads,
+  with and without the key, returned 200 from `PUT .../configuration`, the
+  key was kept, and an operation invocation with `{}` reached the adapter.
+- `npm --prefix website run build` succeeded (links checked).
+- ansible-core 2.22.0 (throwaway venv, collections from `requirements.yml`):
+  `site.yml --syntax-check` passed; `ansible-doc` lists `remove_orphans` for
+  community.docker 5.4.0.
+
+Not run: no browser was available, so clicking through the pages, the
+draft guard on client-side navigation, and the retirement of an installed
+Notes service worker were not exercised. Neither were the GitHub `images`
+job, a registry-mode deploy (the new `ember-web` package must be made public
+first, DEC-008), or `site.yml` against a host.
