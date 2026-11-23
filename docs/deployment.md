@@ -91,8 +91,9 @@ Plugin configuration is lost on API restart. Sign-in is optional
 [OpenID Connect](authentication.md), off by default. There is no database, task execution, or agent
 behavior. Weather sends coordinates to Open-Meteo; its free API is
 non-commercial and requires attribution. Do not expose this prototype to an
-untrusted network or configure real upstream credentials. Immich remains
-configuration-only.
+untrusted network or configure real upstream credentials. The Immich plugin
+reads only the server version, the key's user and album metadata; give it a
+dedicated non-admin Immich account (DEC-005).
 
 `EMBER_LISTEN_ADDR` defaults to `127.0.0.1:8080` when running directly. Compose
 sets it to `0.0.0.0:8080` inside the unpublished API container. The server

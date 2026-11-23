@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
+	"github.com/ParityH4sher/ember/apps/api/internal/plugins/immich"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/weather"
 	"github.com/ParityH4sher/ember/apps/api/internal/projects"
 )
@@ -31,7 +32,7 @@ func NewHandler(version string, vaults *projects.Vaults, services ...ServiceLink
 
 func NewDeploymentHandler(version string, vaults *projects.Vaults, services []ServiceLink, extra []plugins.Registration) http.Handler {
 	return newHandler(version, vaults, append([]plugins.Registration{
-		{Definition: immichDefinition()},
+		{Definition: immich.Definition(), Adapter: immich.New()},
 		{Definition: weather.Definition(), Adapter: weather.New()},
 	}, extra...), services...)
 }
@@ -81,33 +82,4 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.version})
-}
-
-func immichDefinition() plugins.Definition {
-	return plugins.Definition{
-		ID:           "immich",
-		Name:         "Immich",
-		Version:      "1.0.0",
-		APIVersion:   "1",
-		Description:  "Configure an Ember connection to an independently operated Immich service.",
-		Capabilities: []string{"photo-library"},
-		ConfigurationSchema: map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"required":             []any{"baseUrl", "apiKey"},
-			"properties": map[string]any{
-				"baseUrl": map[string]any{
-					"type":        "string",
-					"format":      "uri",
-					"description": "Operator-configured Immich server URL.",
-				},
-				"apiKey": map[string]any{
-					"type":         "string",
-					"writeOnly":    true,
-					"format":       "password",
-					"description": "Immich API key. Never returned by Ember.",
-				},
-			},
-		},
-	}
 }

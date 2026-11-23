@@ -186,6 +186,9 @@ and a 32 GB SSD, running Ubuntu Server. Immich already runs on a separate
 server and is the shared upstream for the proof. The operator can create two
 disposable Immich accounts there, one per Ember instance, with a distinct
 test photo in each. Account creation and the isolation test are pending.
+2026-11-23 — The read-only Immich adapter exists, and one dedicated non-admin
+account (`ember-poc`) is configured for the homelab instance. The second
+account, the second Ember instance and the isolation test are still pending.
 The SSD figure is total Pi capacity; the Ubuntu release, free disk space and
 other Pi services are not yet confirmed.
 

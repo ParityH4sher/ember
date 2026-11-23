@@ -214,3 +214,47 @@ points to the router's upstream resolver. Once the router resolved `auth`
 again, three successive login requests returned 302 to
 `https://auth.parityh4sher.org/application/o/authorize/` with PKCE and the
 expected callback URL. No code change was needed.
+
+## Read-only Immich adapter (2026-11-23)
+
+The Immich plugin was configuration only. It now has an adapter
+(`apps/api/internal/plugins/immich`), version 1.1.0, API version 1, with two
+operations:
+
+- `server` reads `/api/server/version` and `/api/users/me`, which proves the
+  key, and returns the version, the user's name and `isAdmin`;
+- `albums` reads `/api/albums` and returns at most 200 albums, with id, name,
+  asset count, shared flag, owner name and update time.
+
+The key is sent only as `x-api-key`. Redirects are not followed. Responses are
+capped at 1 MiB. Only selected fields are returned, never an email address or
+a raw upstream body. The adapter re-checks the stored URL and key before any
+request. `NewDeploymentHandler` registers it in place of the
+configuration-only definition. The configuration schema is unchanged, so saved
+settings and existing tests stay valid.
+
+Verified on Fedora x86_64 in the pinned `golang:1.27.4` image, with the source
+mounted read-only:
+
+- `go vet ./...` passed;
+- `go test -race -count=1 ./...` passed in every package;
+- the new tests, all passing:
+  - `TestServerInfoAndAlbums` (a subpath install, and no email address or key
+    in results);
+  - `TestAlbumsAreTruncated`;
+  - `TestRejectsInvalidUpstreamResponses` (redirect, 401, oversized, not
+    Immich, not JSON);
+  - `TestRejectsUnsafeConfigurationWithoutCalling`;
+  - `TestImmichPluginUsesConfiguredKey` (the key saved through the API reaches
+    the adapter and never appears in a response; a rejected key gives 502);
+- `gofmt -l .` listed only `internal/plugins/weather/weather.go`, which was
+  already unformatted and is unchanged here.
+
+Earlier, on the Pi, the operator's key for the dedicated non-admin account
+`ember-poc` returned its user from `/api/users/me` and `[]` from
+`/api/albums`. Immich is 3.4.2 at `https://immich.parityh4sher.org`.
+
+Not run: the adapter against the real server, because a new image must be
+published and deployed first, and the configuration re-entered after the
+restart. The album field names (`albumName`, `assetCount`, `owner.name`) come
+from Immich's API and have only been exercised against fixtures.

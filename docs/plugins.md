@@ -45,7 +45,7 @@ Authentik sign-in, use the [OIDC configuration](authentication.md).
 | Plugin | Upstream service | What Ember would use it for | Status |
 | --- | --- | --- | --- |
 | Weather | [Open-Meteo](https://open-meteo.com/) | Current conditions by coordinates | **Implemented example** (see below) |
-| Immich | [Immich](https://immich.app/) | Browse and attach photos/videos from a self-hosted library | Configuration only, makes no upstream calls |
+| Immich | [Immich](https://immich.app/) | Browse and attach photos/videos from a self-hosted library | Implemented read-only: **Server info** (Immich version and the user that owns the API key) and **List albums** (albums that user owns or that are shared with it; metadata only, at most 200). Use a dedicated non-admin Immich account. The key is sent only as `x-api-key`, redirects are not followed, and it must be re-entered after an API restart. |
 | Gitea | [Gitea](https://about.gitea.com/) | Repository name, description and default branch | Implemented read-only for one operator-selected public repository. Activate, then run **Repository details**. No credentials, write access or upstream lifecycle controls. |
 | Paperless-ngx | [Paperless-ngx](https://docs.paperless-ngx.com/) | Search and reference stored documents | Wanted |
 | Mealie | [Mealie](https://mealie.io/) | Recipes and meal planning | Wanted |
