@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.4'
           cache: false
@@ -34,8 +34,8 @@ jobs:
       run:
         working-directory: apps/frontends/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - run: npm ci --no-audit --no-fund
@@ -43,7 +43,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-ui-test-report
           path: |
@@ -55,12 +55,12 @@ jobs:
     needs: [test, web]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assemble portable Compose bundle
         run: bash deploy/build-bundle.sh dist "$GITHUB_SHA"
       - name: Check the extracted bundle through its public proxy
         run: bash deploy/test-bundle.sh dist/*.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ember-compose-bundle
           path: dist/*.tar.gz*
@@ -86,7 +86,7 @@ jobs:
           - { service: web, context: apps/frontends/web }
           - { service: gateway, context: deploy/gateway }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Stamp the API version with the commit
         if: matrix.service == 'api'
         run: printf '%s\n' "$GITHUB_SHA" > apps/api/version.txt
