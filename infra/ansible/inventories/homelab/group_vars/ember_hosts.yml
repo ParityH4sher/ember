@@ -66,4 +66,8 @@ ember_oidc_client_id: ember
 ember_oidc_redirect_url: "{{ ember_public_url }}/api/v1/auth/callback"
 ember_oidc_post_logout_redirect_url: "{{ ember_public_url }}/"
 # Leave empty to admit every Authentik user, or name the groups allowed in.
+# Admitted users get Ember's `user` role: they can call plugin operations.
 ember_oidc_allowed_groups: []
+# Members get Ember's `admin` role: they can also configure and activate
+# plugins. Create this group in Authentik (Directory > Groups) and add yourself.
+ember_oidc_admin_groups: [ember-admins]

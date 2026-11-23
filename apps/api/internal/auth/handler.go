@@ -52,6 +52,9 @@ func New(cfg *Config, opts Options) *Authenticator {
 			},
 		}
 	}
+	if len(cfg.AdminGroups) == 0 {
+		opts.Logger.Warn("sign-in has no adminGroups: signed-in users cannot configure or activate plugins")
+	}
 	a.provider = &provider{cfg: cfg, client: opts.Client, now: opts.Now, logger: opts.Logger}
 	a.store = newStore(opts.Now)
 	// The __Host- prefix pins cookies to this exact origin; browsers require Secure for it.
@@ -72,7 +75,8 @@ func (a *Authenticator) Mode() string {
 }
 
 // Wrap serves the auth routes and, when sign-in is configured, requires a
-// session for every other route except /healthz.
+// session for every other route except /healthz. It passes the caller's Role
+// on in the request context; the API's routes decide which role they need.
 func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/auth/session", a.handleSession)
@@ -85,7 +89,11 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 
 func (a *Authenticator) require(next http.Handler) http.Handler {
 	if a.cfg == nil {
-		return next
+		// Without sign-in nobody can be told apart, so every caller is an
+		// admin, as before roles existed. Keep such an API off untrusted networks.
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serveAs(next, w, r, RoleAdmin)
+		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
@@ -96,7 +104,8 @@ func (a *Authenticator) require(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "cross_origin_request", "cross-origin writes are not allowed")
 			return
 		}
-		if _, ok := a.current(w, r); !ok {
+		s, ok := a.current(w, r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "sign in to use Ember")
 			return
 		}
@@ -105,8 +114,17 @@ func (a *Authenticator) require(next http.Handler) http.Handler {
 				"the sign-in service is unavailable; access is paused until it returns")
 			return
 		}
-		next.ServeHTTP(w, r)
+		serveAs(next, w, r, s.role)
 	})
+}
+
+// serveAs passes the request on with the caller's role. The API's mux records
+// the route it matched on the copy that WithContext makes; copy it back so the
+// access log names that route rather than this mux's catch-all.
+func serveAs(next http.Handler, w http.ResponseWriter, r *http.Request, role Role) {
+	inner := r.WithContext(WithRole(r.Context(), role))
+	next.ServeHTTP(w, inner)
+	r.Pattern = inner.Pattern
 }
 
 // sameOrigin rejects cross-site state-changing requests, which a session
@@ -156,6 +174,7 @@ func (a *Authenticator) handleSession(w http.ResponseWriter, r *http.Request) {
 		"enabled":       true,
 		"authenticated": true,
 		"user":          s.user,
+		"role":          s.role.String(),
 		"expiresAt":     s.expires.UTC().Format(time.RFC3339),
 	})
 }
@@ -257,7 +276,8 @@ func (a *Authenticator) handleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "login_failed", "the identity provider returned an invalid ID token")
 		return
 	}
-	if !a.allowed(user) {
+	role := a.roleFor(user)
+	if role == RoleNone {
 		a.logger.Info("sign-in denied by group policy", "subject", user.Subject)
 		writeError(w, http.StatusForbidden, "access_denied", "your account is not in a group allowed to use Ember")
 		return
@@ -268,12 +288,12 @@ func (a *Authenticator) handleCallback(w http.ResponseWriter, r *http.Request) {
 		a.store.removeSession(old.Value)
 	}
 	id := randomToken()
-	if !a.store.addSession(id, session{user: user, idToken: rawIDToken, expires: a.now().Add(a.cfg.sessionTTL)}) {
+	if !a.store.addSession(id, session{user: user, role: role, idToken: rawIDToken, expires: a.now().Add(a.cfg.sessionTTL)}) {
 		writeError(w, http.StatusServiceUnavailable, "too_many_sessions", "too many active sessions; try again later")
 		return
 	}
 	http.SetCookie(w, a.cookie(a.sessionCookie, id, int(a.cfg.sessionTTL.Seconds())))
-	a.logger.Info("user signed in", "subject", user.Subject)
+	a.logger.Info("user signed in", "subject", user.Subject, "role", role.String())
 	http.Redirect(w, r, attempt.returnTo, http.StatusSeeOther)
 }
 
@@ -316,20 +336,6 @@ func (a *Authenticator) endSessionURL(endpoint, idToken string) string {
 	}
 	target.RawQuery = query.Encode()
 	return target.String()
-}
-
-func (a *Authenticator) allowed(user User) bool {
-	if len(a.cfg.AllowedGroups) == 0 {
-		return true
-	}
-	for _, group := range user.Groups {
-		for _, allowed := range a.cfg.AllowedGroups {
-			if group == allowed {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (a *Authenticator) cookie(name, value string, maxAge int) *http.Cookie {

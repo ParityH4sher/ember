@@ -24,8 +24,9 @@ The Ember API is the OAuth 2.0 client. The browser never handles tokens.
 2. The provider redirects back to `/api/v1/auth/callback`. Ember redeems the code
    from the server and validates the ID token: its RS256/384/512 or
    ES256/384/512 signature against the provider's JWKS, the issuer, the audience
-   and authorized party, expiry, issue time, and nonce. It then applies the
-   optional group policy.
+   and authorized party, expiry, issue time, and nonce. It then uses the
+   user's groups to decide whether they may sign in and with which
+   [role](#roles).
 3. Ember stores the session in memory and sets an opaque `HttpOnly`,
    `SameSite=Lax` cookie. Over HTTPS the cookie is also `Secure` and uses the
    `__Host-` prefix. Access and refresh tokens are discarded.
@@ -34,6 +35,8 @@ With sign-in configured, behavior changes as follows:
 
 - Every API route except `/healthz` and `/v1/auth/*` needs a session.
   Unauthenticated requests receive `401 unauthenticated`.
+- Changing plugin settings or activation needs the `admin` role. Other users
+  receive `403 insufficient_role`.
 - State-changing requests from another origin are refused with `403`, based on
   `Sec-Fetch-Site` and `Origin`.
 - If the provider stops answering its discovery document, new sign-ins and
@@ -47,6 +50,39 @@ With sign-in configured, behavior changes as follows:
 
 The home page (`/`) and Project notes (`/apps/notes/`) show **Sign in** and
 **Sign out** controls when sign-in is enabled.
+
+## Roles
+
+Each signed-in person has one of two roles. Ember decides the role at sign-in
+from the groups in the ID token:
+
+| Role | Who | Allowed actions |
+| --- | --- | --- |
+| `admin` | Members of a group listed in `adminGroups` | Everything a user can do, plus configure, activate and deactivate plugins |
+| `user` | Everyone else who may sign in (see `allowedGroups`) | View plugins and their non-secret settings, call operations of active plugins, use projects and notes |
+
+When `allowedGroups` is set, people in none of the listed groups and in no
+admin group cannot sign in.
+
+| Route | Least role |
+| --- | --- |
+| `PUT /v1/plugins/{pluginId}/configuration` | `admin` |
+| `PUT /v1/plugins/{pluginId}/activation` | `admin` |
+| Every other `/v1/` route, including `POST /v1/plugins/{pluginId}/api/{apiVersion}/{operationId}` | `user` |
+| `/healthz`, `/v1/auth/*` | none |
+
+- Admin groups admit their members by themselves. An admin does not also have
+  to be in `allowedGroups`.
+- Without `adminGroups`, nobody is an admin: no one can configure or activate
+  plugins, and the API logs a warning at startup.
+- The role is fixed for the whole session. A group change at the provider takes
+  effect at the person's next sign-in. To withdraw admin rights at once,
+  restart the API, which signs everyone out.
+- **With sign-in off there are no identities, so every caller is an admin.**
+  This is one more reason to keep an API without sign-in on loopback.
+- The API enforces roles. The home page only hides the settings and activation
+  controls from users. `GET /api/v1/auth/session` reports the signed-in
+  person's `role`.
 
 ## Configuration
 
@@ -69,6 +105,7 @@ the API only, and excluded from backups.
   "postLogoutRedirectUrl": "https://ember.example.com/",
   "scopes": ["openid", "profile", "email"],
   "allowedGroups": ["ember-users"],
+  "adminGroups": ["ember-admins"],
   "sessionTtl": "8h"
 }
 ```
@@ -82,7 +119,8 @@ the API only, and excluded from backups.
 | `scopes` | no | `openid profile email` | Must include `openid`. |
 | `tokenEndpointAuthMethod` | no | `client_secret_basic` with a secret, `none` without | Also accepts `client_secret_post`. |
 | `groupsClaim` | no | `groups` | ID token claim that lists the user's groups. |
-| `allowedGroups` | no | everyone | When set, only users in at least one listed group may sign in. |
+| `allowedGroups` | no | everyone | When set, only members of at least one listed group (or of an `adminGroups` group) may sign in. They get the `user` role. |
+| `adminGroups` | no | nobody | Members of at least one listed group get the `admin` role and may change plugins. See [Roles](#roles). |
 | `sessionTtl` | no | `8h` | A Go duration from `5m` to `720h`. |
 
 All URLs must use `https`. Plain `http` is accepted only for loopback hosts
@@ -94,7 +132,7 @@ and reports which field is wrong.
 Create a **confidential** OIDC client using the authorization code flow, with
 the redirect URI set to `redirectUrl`. Use an RS256 or ES256 signing key; HMAC
 (HS256) ID tokens are not accepted. Include group names in the ID token if you
-use `allowedGroups`.
+use `allowedGroups` or `adminGroups`.
 
 - **Authentik:** create an *OAuth2/OpenID Provider* and an application. The
   issuer is `https://<authentik-host>/application/o/<application-slug>/`.
@@ -103,7 +141,7 @@ use `allowedGroups`.
   Ember:
   [`infra/stacks/authentik`](https://github.com/ParityH4sher/ember/tree/main/infra/stacks/authentik).
 - **Keycloak:** the issuer is `https://<keycloak-host>/realms/<realm>`. Add a
-  *Group Membership* mapper if you use `allowedGroups`.
+  *Group Membership* mapper if you use `allowedGroups` or `adminGroups`.
 
 The API container must be able to reach the issuer under the same URL the
 browser uses, including its DNS name and TLS certificate.
@@ -150,10 +188,17 @@ server-to-server. See
 and
 [`infra/stacks/cloudflared`](https://github.com/ParityH4sher/ember/tree/main/infra/stacks/cloudflared#security).
 
+`ember_oidc_admin_groups` and `ember_oidc_allowed_groups` become `adminGroups`
+and `allowedGroups`. The groups must exist in Authentik: create them under
+**Directory > Groups** and add people there. Authentik's `profile` scope puts
+the user's group names in the `groups` claim, which is what Ember reads.
+
 This setup was verified with a scripted browser against Authentik 2026.8.5.
 The sign-in flow returned to Ember, which validated the ID token, created a
 session with the user's name, email and groups, and honored `allowedGroups`.
-Signing out returned Authentik's end-session URL.
+Signing out returned Authentik's end-session URL. Roles (`adminGroups`) were
+added later and have been tested only against the fake provider in
+`apps/api/internal/auth/auth_test.go`, not yet against Authentik.
 
 ## Local development
 
@@ -170,8 +215,11 @@ go run .
 
 ## Limitations
 
-- Every signed-in user can use every project and plugin. Project ownership and
-  roles are not implemented yet.
+- Roles apply to the whole instance. Every signed-in user can use every
+  project and call every active plugin. Project ownership is not implemented
+  yet.
+- There are two fixed roles. Finer permissions, such as per-plugin or
+  per-operation grants, are not implemented.
 - Sessions and plugin configuration live in API memory.
 - Sign-in covers people only. Workload credentials from DEC-002 are separate
   and not implemented.

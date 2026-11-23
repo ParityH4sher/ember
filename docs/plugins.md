@@ -124,6 +124,9 @@ curl -X POST http://127.0.0.1:3000/api/v1/plugins/weather/api/v1/current \
 6. Update the status column above.
 
 Plugin metadata describes an interface. It does not grant authority. Plugin
-configuration is shared by the whole instance, and even with
-[sign-in](authentication.md) every signed-in user can change it. Do not
-configure real credentials on an instance reachable from an untrusted network.
+configuration is shared by the whole instance. With
+[sign-in](authentication.md), only people with the
+[`admin` role](authentication.md#roles) can change it or activate a plugin, and
+every signed-in user can call the operations of an active plugin. Without
+sign-in, anyone who can reach the API can do both. Do not configure real
+credentials on an instance reachable from an untrusted network.

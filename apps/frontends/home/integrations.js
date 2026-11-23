@@ -88,23 +88,28 @@ function action(parent, title, fill, submit, disabled = false) {
   parent.append(form);
 }
 
-function card(plugin) {
+// Admins get settings and activation controls; users only run operations.
+function card(plugin, admin) {
   const section = el('article');
   const base = '/api/v1/plugins/' + encodeURIComponent(plugin.id);
   section.append(el('h3', plugin.name), el('p', plugin.description),
     el('p', `${plugin.active ? 'Active' : 'Inactive'} · ${plugin.configured ? 'Configured' : 'Needs configuration'} · ${plugin.version}`));
-  const settings = el('details');
-  settings.append(el('summary', 'Settings'));
-  action(settings, 'Save settings', f => fields(f, plugin.configurationSchema, plugin.configuration, plugin.configured), async values => {
-    await api(base + '/configuration', 'PUT', {values});
-    section.replaceWith(card(await api(base)));
-    return 'Saved';
-  });
-  section.append(settings);
-  action(section, plugin.active ? 'Deactivate' : 'Activate', () => () => null, async () => {
-    section.replaceWith(card(await api(base + '/activation', 'PUT', {active: !plugin.active})));
-    return 'Updated';
-  }, !plugin.configured);
+  if (admin) {
+    const settings = el('details');
+    settings.append(el('summary', 'Settings'));
+    action(settings, 'Save settings', f => fields(f, plugin.configurationSchema, plugin.configuration, plugin.configured), async values => {
+      await api(base + '/configuration', 'PUT', {values});
+      section.replaceWith(card(await api(base), admin));
+      return 'Saved';
+    });
+    section.append(settings);
+    action(section, plugin.active ? 'Deactivate' : 'Activate', () => () => null, async () => {
+      section.replaceWith(card(await api(base + '/activation', 'PUT', {active: !plugin.active}), admin));
+      return 'Updated';
+    }, !plugin.configured);
+  } else if (!plugin.active) {
+    section.append(el('p', 'An Ember admin must configure and activate this plugin before you can use it.'));
+  }
   const ops = el('details');
   ops.append(el('summary', 'Operations'));
   section.append(ops);
@@ -143,8 +148,9 @@ async function load(id, render) {
   } catch (err) { host.textContent = `Unable to load ${id}: ${err.message}`; }
 }
 
-if (await account(document.getElementById('account'))) {
-  load('plugins', card);
+const role = await account(document.getElementById('account'));
+if (role) {
+  load('plugins', plugin => card(plugin, role === 'admin'));
   load('services', renderService);
 } else {
   for (const id of ['plugins', 'services']) {

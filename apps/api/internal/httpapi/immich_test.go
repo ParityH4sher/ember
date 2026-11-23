@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/immich"
 )
@@ -32,9 +33,9 @@ func TestImmichPluginUsesConfiguredKey(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler := NewHandlerWithPlugins("test", []plugins.Registration{{
+	handler := as(auth.RoleAdmin, NewHandlerWithPlugins("test", []plugins.Registration{{
 		Definition: immich.Definition(), Adapter: immich.New(),
-	}})
+	}}))
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(method, path, strings.NewReader(body)))

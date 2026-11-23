@@ -73,6 +73,14 @@ and application it created. Delete them in the admin UI if you no longer want
 them. Everyone in Authentik may sign in to Ember unless you set
 `ember_oidc_allowed_groups`.
 
+Ember gives the members of `ember_oidc_admin_groups` the `admin` role, which
+may configure and activate plugins. Everyone else who signs in gets the `user`
+role, which may only call plugin operations. The blueprint does not create
+these groups: create them under **Directory > Groups** in the Authentik admin
+UI and add members there. Ember reads the group names from the `groups` claim
+that the `profile` scope adds. See
+[Roles](../../../docs/authentication.md#roles).
+
 ## Backup and restore
 
 A Docker volume is not a backup. Take a logical database dump:

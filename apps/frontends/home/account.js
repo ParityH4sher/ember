@@ -14,25 +14,27 @@ async function signOut() {
   else location.reload();
 }
 
-// Renders the account bar into host and resolves to true when the API can be
-// used: sign-in is disabled, or the visitor is signed in.
+// Renders the account bar into host. Resolves to null when the visitor must
+// sign in first, otherwise to their role: 'admin' or 'user'. Without sign-in
+// every caller is an admin. The API enforces roles; the page only uses the
+// role to hide controls that the API would refuse.
 export async function account(host) {
   let session;
   try {
     const res = await fetch('/api/v1/auth/session', {headers: {Accept: 'application/json'}, cache: 'no-store'});
-    if (!res.ok) return true; // let the regular requests report the problem
+    if (!res.ok) return 'admin'; // let the regular requests report the problem
     session = await res.json();
   } catch {
-    return true;
+    return 'admin';
   }
-  if (!session.enabled) return true;
+  if (!session.enabled) return 'admin';
   host.hidden = false;
   if (!session.authenticated) {
     const link = document.createElement('a');
     link.href = signInUrl();
     link.textContent = 'Sign in';
     host.replaceChildren('You are signed out. ', link);
-    return false;
+    return null;
   }
   const button = document.createElement('button');
   button.textContent = 'Sign out';
@@ -43,6 +45,7 @@ export async function account(host) {
     signOut().catch(err => { status.textContent = ' ' + err.message; button.disabled = false; });
   };
   const user = session.user || {};
-  host.replaceChildren(`Signed in as ${user.name || user.email || user.subject} `, button, status);
-  return true;
+  const role = session.role === 'admin' ? 'admin' : 'user';
+  host.replaceChildren(`Signed in as ${user.name || user.email || user.subject} (${role}) `, button, status);
+  return role;
 }

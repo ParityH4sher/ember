@@ -198,7 +198,9 @@
              | combine({'postLogoutRedirectUrl': ember_oidc_post_logout_redirect_url}
                        if ember_oidc_post_logout_redirect_url else {})
              | combine({'allowedGroups': ember_oidc_allowed_groups}
-                       if ember_oidc_allowed_groups else {}) }}
+                       if ember_oidc_allowed_groups else {})
+             | combine({'adminGroups': ember_oidc_admin_groups}
+                       if ember_oidc_admin_groups else {}) }}
       register: ember_oidc_config_file
 
     # The API runs as UID 65532 in its container (distroless nonroot).

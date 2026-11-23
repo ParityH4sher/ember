@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/weather"
 )
@@ -32,10 +33,10 @@ func TestWeatherPluginDiscoveryAndInvocation(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler := NewHandlerWithPlugins("test", []plugins.Registration{{
+	handler := as(auth.RoleAdmin, NewHandlerWithPlugins("test", []plugins.Registration{{
 		Definition: weather.Definition(),
 		Adapter:    weather.NewWithClient(upstream.URL+"/v1/forecast", upstream.Client()),
-	}})
+	}}))
 
 	catalog := httptest.NewRecorder()
 	handler.ServeHTTP(catalog, httptest.NewRequest(http.MethodGet, "/v1/plugins/weather/api", nil))
@@ -81,13 +82,13 @@ func TestWeatherPluginDiscoveryAndInvocation(t *testing.T) {
 }
 
 func TestWeatherPluginRejectsInvalidCoordinatesBeforeUpstream(t *testing.T) {
-	handler := NewHandlerWithPlugins("test", []plugins.Registration{{
+	handler := as(auth.RoleAdmin, NewHandlerWithPlugins("test", []plugins.Registration{{
 		Definition: weather.Definition(),
 		Adapter: weather.NewWithClient(
 			"http://127.0.0.1:1/should-not-be-called",
 			http.DefaultClient,
 		),
-	}})
+	}}))
 	activation := httptest.NewRecorder()
 	handler.ServeHTTP(activation, httptest.NewRequest(http.MethodPut, "/v1/plugins/weather/activation", strings.NewReader(`{"active":true}`)))
 	recorder := httptest.NewRecorder()
@@ -100,10 +101,10 @@ func TestWeatherPluginRejectsInvalidCoordinatesBeforeUpstream(t *testing.T) {
 }
 
 func TestWeatherPluginRejectsUnknownAPIVersion(t *testing.T) {
-	handler := NewHandlerWithPlugins("test", []plugins.Registration{{
+	handler := as(auth.RoleAdmin, NewHandlerWithPlugins("test", []plugins.Registration{{
 		Definition: weather.Definition(),
 		Adapter:    weather.New(),
-	}})
+	}}))
 	activation := httptest.NewRecorder()
 	handler.ServeHTTP(activation, httptest.NewRequest(http.MethodPut, "/v1/plugins/weather/activation", strings.NewReader(`{"active":true}`)))
 	recorder := httptest.NewRecorder()

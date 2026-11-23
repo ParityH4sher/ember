@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 )
 
 func TestServiceDirectory(t *testing.T) {
@@ -16,7 +18,7 @@ func TestServiceDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandler("test", nil, nil, links...)
+	handler := as(auth.RoleUser, newHandler("test", nil, nil, links...))
 	for path, want := range map[string]string{"/v1/services": `"name":"Authentik"`, "/v1/plugins": `"plugins":[]`} {
 		r := httptest.NewRecorder()
 		handler.ServeHTTP(r, httptest.NewRequest("GET", path, nil))

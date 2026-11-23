@@ -20,6 +20,7 @@ func TestAccessLogCorrelatesWithoutRequestData(t *testing.T) {
 		want  int
 	}{
 		{"/healthz?token=fixture-private", "GET /healthz", http.StatusOK},
+		{"/v1/plugins?token=fixture-private", "GET /v1/plugins", http.StatusOK},
 		{"/fixture-private", "unmatched", http.StatusNotFound},
 	} {
 		logs.Reset()

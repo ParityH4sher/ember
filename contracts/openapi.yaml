@@ -10,7 +10,10 @@ info:
     configures sign-in, every route except /healthz and /v1/auth/* requires the
     session cookie, state-changing requests must come from the configured
     browser origin, and signed-in access pauses while the identity provider is
-    unreachable. Signed-in users are not yet distinguished by project or role.
+    unreachable. Each signed-in user has a role taken from identity provider
+    groups: user (read Ember, use projects and notes, call plugin operations)
+    or admin (also configure and activate plugins). Without sign-in every
+    caller is an admin. Roles do not yet distinguish projects.
     Plugin configuration and plugin operations are prototype behavior; only the
     Weather plugin currently makes a fixed upstream request. Other listed
     plugins may be configuration-only.
@@ -68,6 +71,7 @@ paths:
                     enabled: true
                     authenticated: true
                     user: {subject: 3f9c, name: Ada Lovelace, email: ada@example.com, groups: [makers]}
+                    role: user
                     expiresAt: "2026-11-21T20:00:00Z"
   /v1/auth/login:
     get:
@@ -402,9 +406,10 @@ paths:
       operationId: setPluginActivation
       summary: Activate or deactivate an available plugin
       description: >-
-        Sets this instance's activation flag for the integration. This prototype
-        does not yet perform upstream service operations. Deactivation does not
-        stop or modify the independently operated upstream service.
+        Sets this instance's activation flag for the integration. Requires the
+        admin role. This prototype does not yet perform upstream service
+        operations. Deactivation does not stop or modify the independently
+        operated upstream service.
       parameters:
         - $ref: "#/components/parameters/PluginId"
       requestBody:
@@ -422,7 +427,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/CrossOriginRequest"
+          $ref: "#/components/responses/AdminWriteForbidden"
         "503":
           $ref: "#/components/responses/IdentityProviderUnavailable"
         "200":
@@ -476,7 +481,7 @@ paths:
         write-only and stored server-side; responses must never disclose secret
         values. Configuration connects this Ember instance to an upstream
         service (for example, Immich); it does not install or operate that
-        service.
+        service. Requires the admin role.
       parameters:
         - $ref: "#/components/parameters/PluginId"
       requestBody:
@@ -496,7 +501,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/CrossOriginRequest"
+          $ref: "#/components/responses/AdminWriteForbidden"
         "503":
           $ref: "#/components/responses/IdentityProviderUnavailable"
         "200":
@@ -553,9 +558,10 @@ paths:
         The backend resolves operationId and apiVersion against the plugin's
         registered operation definitions, validates inputs, and routes the
         request to that operation's fixed upstream service route. Clients
-        cannot supply an upstream URL, path, HTTP method, or credential. The
-        backend must enforce caller authorization, plugin activation,
-        destination policy, operation scopes, timeouts, response limits, and
+        cannot supply an upstream URL, path, HTTP method, or credential. Any
+        signed-in user (user or admin role) may invoke an operation of an
+        active plugin. The backend must enforce caller authorization, plugin
+        activation, destination policy, operation scopes, timeouts, response limits, and
         audit policy before forwarding. This must not be an unrestricted
         reverse proxy.
       parameters:
@@ -651,6 +657,19 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example: {code: cross_origin_request, message: cross-origin writes are not allowed}
+    AdminWriteForbidden:
+      description: >-
+        Sign-in is configured and either the request came from another origin
+        or the signed-in user does not have the admin role
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            crossOrigin:
+              value: {code: cross_origin_request, message: cross-origin writes are not allowed}
+            notAdmin:
+              value: {code: insufficient_role, message: this action needs the Ember admin role}
     IdentityProviderUnavailable:
       description: The identity provider is unreachable; sign-in and signed-in access are paused
       content:
@@ -726,6 +745,13 @@ components:
           type: boolean
         user:
           $ref: "#/components/schemas/AuthUser"
+        role:
+          type: string
+          enum: [user, admin]
+          description: >-
+            Present when authenticated. Decided at sign-in from the user's
+            groups (adminGroups and allowedGroups); a group change takes effect
+            at the next sign-in.
         expiresAt:
           type: string
           format: date-time

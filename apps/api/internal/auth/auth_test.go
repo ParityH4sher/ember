@@ -285,9 +285,13 @@ func signIn(t *testing.T, h http.Handler, idp *fakeIdP) *http.Cookie {
 }
 
 func TestDisabledAuthPassesThrough(t *testing.T) {
-	h := New(nil, Options{}).Wrap(protected)
+	var seen Role
+	h := New(nil, Options{}).Wrap(roleRecorder(&seen))
 	if rec := do(h, http.MethodPost, "/v1/projects", nil, map[string]string{"Sec-Fetch-Site": "cross-site"}); rec.Code != http.StatusNoContent {
 		t.Fatalf("protected status=%d", rec.Code)
+	}
+	if seen != RoleAdmin {
+		t.Fatalf("without sign-in every caller must be an admin, got %v", seen)
 	}
 	rec := do(h, http.MethodGet, "/v1/auth/session", nil, nil)
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"enabled":false}` {
@@ -335,13 +339,15 @@ func TestSignInFlow(t *testing.T) {
 	var body struct {
 		Enabled, Authenticated bool
 		User                   User
+		Role                   string
 		ExpiresAt              string
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	if !body.Enabled || !body.Authenticated || body.User.Subject != "user-1" || body.User.Name != "Ada Lovelace" ||
-		body.User.Email != "ada@example.test" || len(body.User.Groups) != 1 || body.ExpiresAt != "2026-11-21T20:00:00Z" {
+		body.User.Email != "ada@example.test" || len(body.User.Groups) != 1 || body.Role != "user" ||
+		body.ExpiresAt != "2026-11-21T20:00:00Z" {
 		t.Fatalf("session body=%s", rec.Body.String())
 	}
 	if rec.Header().Get("Cache-Control") != "no-store" {
@@ -420,17 +426,74 @@ func hmacSigned(claims map[string]any) string {
 	return input + "." + b64(mac.Sum(nil))
 }
 
-func TestAllowedGroups(t *testing.T) {
-	idp := newFakeIdP(t)
-	cfg := testConfig(t, idp)
-	cfg.AllowedGroups = []string{"admins"}
-	h := newTestHandler(t, idp, cfg)
-	q, login := startLogin(t, h, "/")
-	if rec := callback(h, idp.authorize(q), q.Get("state"), login); rec.Code != http.StatusForbidden || errorCode(t, rec) != "access_denied" {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+// roleRecorder stands in for the API and records the role Wrap passed on.
+func roleRecorder(seen *Role) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*seen = RoleFrom(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+// The fake provider puts the user in the single group "makers".
+func TestGroupsDecideSignInAndRole(t *testing.T) {
+	for name, tc := range map[string]struct {
+		allowed, admin []string
+		want           Role // RoleNone: sign-in is refused
+	}{
+		"no policy admits everyone as user": {want: RoleUser},
+		"outside allowedGroups":             {allowed: []string{"admins"}},
+		"in allowedGroups":                  {allowed: []string{"admins", "makers"}, want: RoleUser},
+		"in adminGroups":                    {admin: []string{"makers"}, want: RoleAdmin},
+		"adminGroups admit on their own":    {allowed: []string{"viewers"}, admin: []string{"makers"}, want: RoleAdmin},
+		"outside adminGroups":               {admin: []string{"ops"}, want: RoleUser},
+		"outside both":                      {allowed: []string{"viewers"}, admin: []string{"ops"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			idp := newFakeIdP(t)
+			cfg := testConfig(t, idp)
+			cfg.AllowedGroups, cfg.AdminGroups = tc.allowed, tc.admin
+			var seen Role
+			h := New(cfg, Options{Client: idp.srv.Client(), Now: idp.clock.Now}).Wrap(roleRecorder(&seen))
+			if tc.want == RoleNone {
+				q, login := startLogin(t, h, "/")
+				rec := callback(h, idp.authorize(q), q.Get("state"), login)
+				if rec.Code != http.StatusForbidden || errorCode(t, rec) != "access_denied" || responseCookie(rec, "__Host-ember_session") != nil {
+					t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+				}
+				return
+			}
+			session := []*http.Cookie{signIn(t, h, idp)}
+			if rec := do(h, http.MethodGet, "/v1/projects", session, nil); rec.Code != http.StatusNoContent || seen != tc.want {
+				t.Fatalf("status=%d role=%v want %v", rec.Code, seen, tc.want)
+			}
+			var body struct{ Role string }
+			if err := json.Unmarshal(do(h, http.MethodGet, "/v1/auth/session", session, nil).Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Role != tc.want.String() {
+				t.Fatalf("session role=%q want %q", body.Role, tc.want)
+			}
+		})
 	}
-	cfg.AllowedGroups = []string{"admins", "makers"}
-	signIn(t, h, idp)
+}
+
+// The access log reads the matched route from the request it handed on, so
+// Wrap must leave the API mux's pattern there, with and without sign-in.
+func TestWrapKeepsTheAPIRoutePattern(t *testing.T) {
+	api := http.NewServeMux()
+	api.Handle("GET /v1/projects/{id}", protected)
+	idp := newFakeIdP(t)
+	enabled := New(testConfig(t, idp), Options{Client: idp.srv.Client(), Now: idp.clock.Now}).Wrap(api)
+	session := signIn(t, enabled, idp)
+	for name, h := range map[string]http.Handler{"disabled": New(nil, Options{}).Wrap(api), "enabled": enabled} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/projects/p", nil)
+		req.AddCookie(session)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent || req.Pattern != "GET /v1/projects/{id}" {
+			t.Errorf("%s: status=%d pattern=%q", name, rec.Code, req.Pattern)
+		}
+	}
 }
 
 func TestCrossOriginWritesAreRejected(t *testing.T) {
@@ -592,6 +655,12 @@ func TestParseConfig(t *testing.T) {
 		strings.Join(cfg.Scopes, " ") != "openid profile email" || !cfg.secure || cfg.origin != "https://ember.example" {
 		t.Fatalf("defaults: %+v", cfg)
 	}
+	// The shape Ansible's ember role writes when ember_oidc_admin_groups is set.
+	roles, err := ParseConfig([]byte(`{"issuer":"https://auth.example/application/o/ember/","clientId":"ember",
+		"redirectUrl":"https://ember.example/api/v1/auth/callback","sessionTtl":"8h","adminGroups":["ember-admins"]}`), "secret")
+	if err != nil || len(roles.AdminGroups) != 1 || roles.AdminGroups[0] != "ember-admins" || len(roles.AllowedGroups) != 0 {
+		t.Fatalf("adminGroups: %+v, %v", roles, err)
+	}
 	public, err := ParseConfig([]byte(`{"issuer":"http://127.0.0.1:5556/dex","clientId":"ember","redirectUrl":"http://localhost:5173/api/v1/auth/callback"}`), "")
 	if err != nil || public.TokenEndpointAuthMethod != methodNone || public.secure {
 		t.Fatalf("loopback public client: %+v, %v", public, err)
@@ -609,6 +678,7 @@ func TestParseConfig(t *testing.T) {
 		"unknown method":           {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","tokenEndpointAuthMethod":"private_key_jwt"}`, "s"},
 		"short session":            {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","sessionTtl":"1m"}`, "s"},
 		"unknown field":            {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","clientSecret":"inline"}`, "s"},
+		"empty admin group":        {`{"issuer":"https://auth.example","clientId":"ember","redirectUrl":"https://ember.example/cb","adminGroups":[" "]}`, "s"},
 		"trailing data":            {valid + `{}`, "s"},
 	} {
 		if _, err := ParseConfig([]byte(tc.raw), tc.secret); err == nil {

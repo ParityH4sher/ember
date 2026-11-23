@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 	"github.com/ParityH4sher/ember/apps/api/internal/httpapi"
 	"github.com/ParityH4sher/ember/apps/api/internal/projects"
 )
@@ -18,7 +19,8 @@ func httpHandler(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httpapi.NewHandler(version, vaults)
+	// As in run: sign-in off, so auth.Wrap gives every caller the admin role.
+	return auth.New(nil, auth.Options{}).Wrap(httpapi.NewHandler(version, vaults))
 }
 
 func TestHealthz(t *testing.T) {

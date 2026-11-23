@@ -23,6 +23,7 @@ type User struct {
 
 type session struct {
 	user    User
+	role    Role   // decided at sign-in from the ID token's groups
 	idToken string // kept only as id_token_hint for provider sign-out
 	expires time.Time
 }

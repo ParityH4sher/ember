@@ -43,8 +43,12 @@ type Config struct {
 	TokenEndpointAuthMethod string `json:"tokenEndpointAuthMethod,omitempty"`
 	// GroupsClaim names the ID token claim holding group names.
 	GroupsClaim string `json:"groupsClaim,omitempty"`
-	// AllowedGroups, when set, admits only users in at least one listed group.
+	// AllowedGroups, when set, admits only users in at least one listed group
+	// (or in AdminGroups). Admitted users get the user role.
 	AllowedGroups []string `json:"allowedGroups,omitempty"`
+	// AdminGroups gives members the admin role, which may change plugins.
+	// Without it, nobody signed in can change plugins.
+	AdminGroups []string `json:"adminGroups,omitempty"`
 	// SessionTTL is a Go duration such as "8h"; sessions do not renew.
 	SessionTTL string `json:"sessionTtl,omitempty"`
 
@@ -175,6 +179,11 @@ func (c *Config) validate() error {
 	for _, group := range c.AllowedGroups {
 		if strings.TrimSpace(group) == "" {
 			return errors.New("allowedGroups must not contain empty names")
+		}
+	}
+	for _, group := range c.AdminGroups {
+		if strings.TrimSpace(group) == "" {
+			return errors.New("adminGroups must not contain empty names")
 		}
 	}
 

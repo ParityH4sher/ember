@@ -258,3 +258,58 @@ Not run: the adapter against the real server, because a new image must be
 published and deployed first, and the configuration re-entered after the
 restart. The album field names (`albumName`, `assetCount`, `owner.name`) come
 from Immich's API and have only been exercised against fixtures.
+
+## Admin and user roles (2026-11-23)
+
+**Change:** sign-in now gives each person a role from their ID token groups.
+`adminGroups` gives `admin`; `allowedGroups` (or everyone, when it is unset)
+gives `user`. Only admins may `PUT` plugin configuration or activation. Users
+may read plugins and call operations of active plugins. Every route in
+`internal/httpapi/server.go` names its least role. A request without a role
+(one that did not pass through `auth.Wrap`) is refused with 403. With sign-in
+off, `auth.Wrap` gives every caller `admin`, which keeps the previous
+behavior. The home page hides settings and activation from users. The
+contract, `docs/authentication.md`, `docs/plugins.md`, the `ember` Ansible role
+(`ember_oidc_admin_groups`) and the homelab inventory (`[ember-admins]`) were
+updated.
+
+`auth.Wrap` now passes a copy of the request (`WithContext`), and the inner
+mux sets `Pattern` on that copy. Without copying it back, every access-log
+line would have named the route `/`. `serveAs` copies the pattern back, and
+both `TestWrapKeepsTheAPIRoutePattern` and a `/v1/plugins` case in the
+access-log test fail when the copy is removed.
+
+Verification on Fedora (x86_64), host without Go, rootless Podman:
+
+- `podman run golang:1.27.4@sha256:205c…26cf` in `apps/api`:
+  `go vet ./... && go test -race -count=1 ./...` passed.
+  `gofmt -l .` listed only `internal/plugins/weather/weather.go`, which was
+  already unformatted and is unchanged here.
+- Mutation checks on a copy: removing the pattern copy-back failed the two
+  tests above, and registering the configuration `PUT` as `user` failed
+  `TestPluginRoles`.
+- New tests:
+  - `TestGroupsDecideSignInAndRole` covers seven group/role combinations
+    against the fake provider, including an admin outside `allowedGroups`;
+  - `TestPluginRoles` checks that a user gets 403 on both `PUT`s without
+    changing state, a user can list and invoke, and a request without a role
+    gets 403 everywhere but `/healthz`;
+  - `TestDisabledAuthPassesThrough` now also asserts the admin role.
+- ansible-core 2.22.0 in a `python:3.13-slim` container rendered the role's
+  `auth.json` expression, taken from `roles/ember/tasks/main.yml`, with
+  `[ember-admins]` and with `[]`. `adminGroups` appeared only in the first.
+  `TestParseConfig` accepts that shape.
+- The home page's `account.js` and `integrations.js` were run in Node 24 with
+  jsdom 26 against a mocked API. Admin and sign-in-off showed Settings and
+  Activate/Deactivate. User showed only Operations, plus the "An Ember admin
+  must configure and activate…" note on the inactive plugin.
+- OpenAPI: YAML parses and every `$ref` resolves.
+- `npm --prefix website ci && npm --prefix website run build` in a Node 24
+  container, on a copy without `node_modules`, succeeded. It reported no
+  broken links or anchors, including the new `authentication.md#roles` links.
+
+Not run: sign-in against the real Authentik, so it is unconfirmed that a
+member of `ember-admins` arrives with that group in the `groups` claim. The
+earlier Authentik run did show groups in the session. Also not run: a real
+browser, the bundle smoke test, `--syntax-check` of the playbooks, and a
+deployment.

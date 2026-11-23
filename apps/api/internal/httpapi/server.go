@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/immich"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/weather"
@@ -58,26 +59,42 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 		}
 	}
 
+	// Each route names the least role that may call it. auth.Wrap sets the
+	// caller's role; without one, every route except /healthz refuses.
 	mux := http.NewServeMux()
+	route := func(pattern string, least auth.Role, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, allow(least, handler))
+	}
 	mux.HandleFunc("GET /healthz", server.health)
-	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, _ *http.Request) {
+	route("GET /v1/services", auth.RoleUser, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"services": append([]ServiceLink{}, services...)})
 	})
-	mux.HandleFunc("GET /v1/plugins", server.listPlugins)
-	mux.HandleFunc("GET /v1/plugins/{pluginId}", server.getPlugin)
-	mux.HandleFunc("GET /v1/plugins/{pluginId}/configuration", server.getPluginConfiguration)
-	mux.HandleFunc("PUT /v1/plugins/{pluginId}/configuration", server.setPluginConfiguration)
-	mux.HandleFunc("PUT /v1/plugins/{pluginId}/activation", server.setPluginActivation)
-	mux.HandleFunc("GET /v1/plugins/{pluginId}/api", server.listPluginOperations)
-	mux.HandleFunc("POST /v1/plugins/{pluginId}/api/{apiVersion}/{operationId}", server.invokePluginOperation)
-	mux.HandleFunc("POST /v1/projects", server.createProject)
-	mux.HandleFunc("GET /v1/projects", server.listProjects)
-	mux.HandleFunc("DELETE /v1/projects/{projectId}", server.deleteProject)
+	route("GET /v1/plugins", auth.RoleUser, server.listPlugins)
+	route("GET /v1/plugins/{pluginId}", auth.RoleUser, server.getPlugin)
+	route("GET /v1/plugins/{pluginId}/configuration", auth.RoleUser, server.getPluginConfiguration)
+	route("PUT /v1/plugins/{pluginId}/configuration", auth.RoleAdmin, server.setPluginConfiguration)
+	route("PUT /v1/plugins/{pluginId}/activation", auth.RoleAdmin, server.setPluginActivation)
+	route("GET /v1/plugins/{pluginId}/api", auth.RoleUser, server.listPluginOperations)
+	route("POST /v1/plugins/{pluginId}/api/{apiVersion}/{operationId}", auth.RoleUser, server.invokePluginOperation)
+	route("POST /v1/projects", auth.RoleUser, server.createProject)
+	route("GET /v1/projects", auth.RoleUser, server.listProjects)
+	route("DELETE /v1/projects/{projectId}", auth.RoleUser, server.deleteProject)
 	if vaults, ok := store.(*projects.Vaults); ok {
-		mux.HandleFunc("GET /v1/projects/{projectId}/notes", listNotes(vaults))
-		mux.HandleFunc("PUT /v1/projects/{projectId}/notes", saveNote(vaults))
+		route("GET /v1/projects/{projectId}/notes", auth.RoleUser, listNotes(vaults))
+		route("PUT /v1/projects/{projectId}/notes", auth.RoleUser, saveNote(vaults))
 	}
 	return mux
+}
+
+// allow runs handler only for callers holding at least the least role.
+func allow(least auth.Role, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if auth.RoleFrom(r.Context()) < least {
+			writeError(w, http.StatusForbidden, "insufficient_role", "this action needs the Ember "+least.String()+" role")
+			return
+		}
+		handler(w, r)
+	}
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
