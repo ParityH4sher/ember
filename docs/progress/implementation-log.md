@@ -391,3 +391,34 @@ The blueprint lists only the callback URI, and `auth.json` has no
 Not run: a sign-out against the homelab Authentik. That needs `stacks.yml`
 (blueprint) and `site.yml` (`auth.json` and an API restart). No new image is
 needed. The docs site build was not rerun; the docs change adds no links.
+
+## Duplicate-key warnings from the Authentik stack file (2026-11-23)
+
+**Problem (user report):** each `stacks.yml` run printed "Found duplicate
+mapping key 'secrets'" and "'volumes'" at the stack role's "Read the stack's
+declared secrets and settings" task.
+
+**Cause:** in `infra/stacks/authentik/compose.yaml`, `worker` merged
+`<<: *authentik` and then overrode `secrets` and `volumes` from it. That is
+valid YAML, and Compose applies it as intended. Ansible's `from_yaml` expands
+the merge first and then reports the overriding keys as duplicates, keeping
+the last value, which is the intended one. The role reads only the top-level
+`secrets` and `x-ember-stack`, so nothing went wrong, but the warnings recurred
+on every run, and setting `DUPLICATE_YAML_DICT_KEY=error` would stop the play.
+
+**Change:** `secrets` and `volumes` left the `x-authentik` anchor. `server` and
+`worker` each list their own.
+
+Verification:
+
+- Docker Compose 5.8.0 ran `config --format json` on the committed and the
+  edited file, with `PUBLIC_HOST` and `PUBLIC_ROUTE` set. `services`,
+  `volumes`, `secrets` and `networks` were identical; only the ignored
+  `x-authentik` extension differed.
+- ansible-core 2.22.0 (`python:3.13-slim` container) evaluated the role's
+  `lookup('ansible.builtin.file', …) | from_yaml` on both files. The committed
+  file produced both warnings; the edited file produced none, with the same
+  top-level secrets.
+
+Not run: `stacks.yml` against the Pi. The services are unchanged, so Compose
+should not recreate the containers.

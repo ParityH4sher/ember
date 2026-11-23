@@ -17,6 +17,9 @@ x-ember-stack:
     # Shared with Ember's API, which reads it from this file (roles/ember).
     - ember_oidc_client_secret
 
+# Settings shared by server and worker. Keep secrets and volumes out of it:
+# each service lists its own, because overriding a merged key makes Ansible's
+# YAML parser warn about duplicate keys when the stack role reads this file.
 x-authentik: &authentik
   image: ghcr.io/goauthentik/server:2026.8.5@sha256:602227a86455d6772e3d16b7d852713c4f864f40df5df894abd1285bb53979a5
   depends_on:
@@ -34,15 +37,10 @@ x-authentik: &authentik
     AUTHENTIK_SECRET_KEY: file:///run/secrets/authentik_secret_key
     AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
     AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-  secrets:
-    - authentik_postgres_password
-    - authentik_secret_key
   shm_size: 512mb
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   restart: unless-stopped
-  volumes:
-    - data:/data
 
 services:
   postgresql:
@@ -71,6 +69,11 @@ services:
   server:
     <<: *authentik
     command: server
+    secrets:
+      - authentik_postgres_password
+      - authentik_secret_key
+    volumes:
+      - data:/data
     ports:
       - "127.0.0.1:${HTTP_PORT:-9000}:9000"
     networks:
