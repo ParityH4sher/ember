@@ -22,7 +22,8 @@
   "mounts": [
     "type=volume,source=ember-web-modules-${devcontainerId},target=/workspaces/ember/apps/frontends/web/node_modules",
     "type=volume,source=ember-web-kit-${devcontainerId},target=/workspaces/ember/apps/frontends/web/.svelte-kit",
-    "type=volume,source=ember-docs-modules-${devcontainerId},target=/workspaces/ember/website/node_modules"
+    "type=volume,source=ember-docs-modules-${devcontainerId},target=/workspaces/ember/website/node_modules",
+    "type=volume,source=ember-claude-config-${devcontainerId},target=/home/node/.claude"
   ],
   "remoteEnv": {
     "PATH": "/home/node/.venvs/ember-ansible/bin:${containerEnv:PATH}"
@@ -46,11 +47,13 @@
   "containerEnv": {
     "CHOKIDAR_USEPOLLING": "true",
     "CHOKIDAR_INTERVAL": "1000",
-    "WATCHPACK_POLLING": "1000"
+    "WATCHPACK_POLLING": "1000",
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
   },
   "customizations": {
     "vscode": {
       "extensions": [
+        "anthropic.claude-code",
         "GitHub.vscode-github-actions",
         "GitHub.vscode-pull-request-github",
         "golang.go",

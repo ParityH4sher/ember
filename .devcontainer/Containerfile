@@ -1,5 +1,9 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:24-bookworm
 
+# Claude Code, a development aid in this container only, not part of Ember.
+# Set the build arg to an empty string to build without it.
+ARG CLAUDE_CODE_VERSION=2.1.323
+
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -12,4 +16,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 USER node
+# The npm global prefix is owned by node, so Claude Code's updater can replace
+# it without root. ~/.claude is the mount point of the config volume and must
+# exist with node as its owner before the volume is first created. The
+# package's postinstall links the native binary for this platform; allow it
+# by name so it keeps running once npm stops running install scripts by default.
+RUN mkdir -p /home/node/.claude \
+    && if [ -n "${CLAUDE_CODE_VERSION}" ]; then \
+        npm install -g --no-audit --no-fund \
+            --allow-scripts=@anthropic-ai/claude-code \
+            "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        && claude --version \
+        && npm cache clean --force; \
+    fi
 WORKDIR /workspaces/ember

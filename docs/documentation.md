@@ -35,7 +35,7 @@ For VS Code, install the Dev Containers extension, set
 **Dev Containers: Reopen in Container**.
 
 The container requests Node.js 24 and Go 1.27.4 and includes distribution
-Ansible, Python, Make, and GitHub CLI. Use the
+Ansible, Python, Make, GitHub CLI, and Claude Code. Use the
 [qualified Ansible controller](operations/README.md#ansible-host-provisioning)
 for provisioning; the devcontainer's distribution Ansible may be older.
 It maps the host user to the container's `node` user with Podman's `keep-id`
@@ -47,11 +47,23 @@ Container creation installs the web toolchain from `apps/frontends/web/package-l
 and runs `svelte-check` and the worker type check. The web and docs dependencies
 live in container volumes separate from host `node_modules`.
 
-VS Code installs extensions for Svelte, GitHub Actions and pull requests, Go, Docker
-file editing, Ansible, YAML, OpenAPI, Markdown linting/preview, and EditorConfig.
+VS Code installs extensions for Claude Code, Svelte, GitHub Actions and pull
+requests, Go, Docker file editing, Ansible, YAML, OpenAPI, Markdown
+linting/preview, and EditorConfig.
 The Docker extension provides Compose editing support; the container does not
 mount a Docker/Podman socket or run privileged containers. Run Compose against
 your host runtime separately when needed.
+
+Claude Code (the `claude` CLI) is a development aid in this container only.
+Ember does not depend on it, and you can use another agent instead. Run `claude`
+in a container terminal and sign in with your own account or API key. The
+`ember-claude-config-<id>` volume holds its settings and sign-in
+(`CLAUDE_CONFIG_DIR=/home/node/.claude`), so they survive a rebuild. Remove
+that volume to discard them. `CLAUDE_CODE_VERSION` in
+`.devcontainer/Containerfile` pins the version a build installs. Claude Code
+then updates itself. To build without it, set that build arg to an empty
+string, for example with `"build": {"args": {"CLAUDE_CODE_VERSION": ""}}` in
+`devcontainer.json`.
 
 Edit files under `docs/`; the browser updates automatically. Polling handles
 bind-mounted file changes. Rebuild the container after changing its configuration

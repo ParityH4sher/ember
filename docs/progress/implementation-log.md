@@ -495,3 +495,49 @@ socket yet, plan P8); ARM64; an API restart while a real run is in progress
 (covered only by handler tests); any real model, since agents have no network
 (P9). The headless-browser run is a smoke check, not an accessibility or
 cross-browser review.
+
+## Claude Code in the devcontainer (2026-11-23)
+
+**Request (user):** include Claude Code in the devcontainer by default.
+
+**Change:**
+
+- `.devcontainer/Containerfile` installs `@anthropic-ai/claude-code`, pinned
+  by the `CLAUDE_CODE_VERSION` build arg (2.1.323, npm's `stable` tag that
+  day; `latest` was 2.1.330). It installs as `node` into the image's
+  node-owned npm prefix, so Claude Code's self-update needs no root. An empty
+  build arg skips the install.
+- The package's `postinstall` hard-links the native binary from the
+  platform's optional dependency (`claude-code-linux-x64` or `-linux-arm64`)
+  over `bin/claude.exe`. npm 11.19.1 still runs it, but warns that it is "not
+  yet covered by allowScripts", so the install passes
+  `--allow-scripts=@anthropic-ai/claude-code`.
+- `devcontainer.json`:
+  - mounts the named volume `ember-claude-config-${devcontainerId}` at
+    `/home/node/.claude`;
+  - sets `CLAUDE_CONFIG_DIR` to it, so `.claude.json` lands there too and
+    sign-in survives rebuilds;
+  - adds the `anthropic.claude-code` extension.
+- `setup.sh` chowns that volume with the other dependency volumes.
+
+Anthropic's devcontainer feature
+`ghcr.io/anthropics/devcontainer-features/claude-code` 1.0.5 was not used. Its
+`install.sh` installs the latest release, unpinned. It also installs
+iptables, ipset and other firewall packages, plus an inactive firewall script.
+This is a development aid only: Ember itself does not depend on any agent.
+
+**Platform:** Fedora 45, Linux 7.2.11 x86_64, rootless Podman 6.2.0, base
+image `mcr.microsoft.com/devcontainers/javascript-node:24-bookworm` (npm
+11.19.1).
+
+| Check | Result |
+| --- | --- |
+| `bash -n .devcontainer/setup.sh`; `devcontainer.json` parsed as JSON | Pass. |
+| `podman build -f .devcontainer/Containerfile .devcontainer`, then `claude --version` as `node` | `2.1.323 (Claude Code)`; `claude` resolves to `/usr/local/share/npm-global/bin/claude`, an x86-64 ELF identical (SHA-256) to the platform package's binary; package files owned by `node`. No install-scripts warning with `--allow-scripts`. |
+| Container run with `--userns=keep-id:uid=1000,gid=1000`, `CLAUDE_CONFIG_DIR`, and a new named volume at `/home/node/.claude` | Volume owned by `node`; the `setup.sh` chown succeeded; a file written there was present in a second container using the same volume. |
+| Build with `--build-arg CLAUDE_CODE_VERSION=` | Succeeded; no `claude` on `PATH`; `~/.claude` still exists. |
+
+**Not run:** `devcontainer up` with the Dev Container CLI, and therefore the
+full `postCreateCommand` and the VS Code extension install. The user's own
+devcontainer held ports 3000 and 5173. Also not run: an arm64 build, an
+interactive `claude` sign-in, and a self-update inside the container.
