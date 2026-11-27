@@ -7,6 +7,7 @@ written in TypeScript. It owns the whole site behind the gateway:
 | --- | --- | --- |
 | `/login/` | Sign-in: one **Sign in with Authentik** button | `web/src/routes/login/+page.svelte` |
 | `/` | Dashboard: API status, counts, recent projects, shared services | `web/src/routes/+page.svelte` |
+| `/desktop/` | Desktop surface with the launcher circle; where the installed app starts | `web/src/routes/desktop/+page.svelte` |
 | `/apps/notes/` | Project notes: linked Markdown notes and chats per project | `web/src/routes/apps/notes/+page.svelte` |
 | `/plugins/` | Plugins: run operations; admins configure and activate | `web/src/routes/plugins/+page.svelte` |
 | `/settings/` | Display preferences (theme, density) for this browser | `web/src/routes/settings/+page.svelte` |
@@ -27,7 +28,8 @@ The gateway routes `/api/` to the Ember API and everything else to the `web`
 service. From the Ember root, run
 `docker compose -f deploy/compose.yaml up --build -d` and visit
 `http://127.0.0.1:3000/`. To install the app, use the browser's install action
-(Add to Home Screen on iOS); it opens on Project notes. Installation and
+(Add to Home Screen on iOS); it opens on the desktop surface (`/desktop/`, the
+manifest's `start_url`), and the Dashboard is an app in the launcher. Installation and
 service workers require HTTPS or localhost/loopback.
 
 Shared code lives in `web/src/lib/`:
@@ -60,7 +62,7 @@ token. Hiding admin controls is a convenience; the API enforces roles.
 | Suite | Command | Needs | Covers |
 | --- | --- | --- | --- |
 | Unit (`web/tests/unit`) | `npm run test:unit` | Node | Plain TypeScript modules without a browser: the widget and app registries and their validation, launcher search and ordering, pinned/recent state, keyboard navigation and shortcuts. Runs in CI (`web` job). |
-| UI (`web/tests/ui`) | `npm run test:ui` | Node, Playwright's Chromium | The built app on `vite preview` with a mocked API: sign-in page and `returnTo`, roles, user menu, every page, session expiry, theme, 404, phone layout, the app launcher widget (search, keyboard, pinning, cross-window sync, runtime apps, configure/remove/add), and axe WCAG 2.1 AA checks on every page in both themes. Runs in CI (`web` job). |
+| UI (`web/tests/ui`) | `npm run test:ui` | Node, Playwright's Chromium | The built app on `vite preview` with a mocked API: sign-in page and `returnTo`, roles, user menu, every page, session expiry, theme, 404, phone layout, the app launcher widget and circle (search, keyboard, the launcher shortcut, pinning, cross-window sync, runtime apps, configure/remove/add), the manifest's `start_url`, and axe WCAG 2.1 AA checks on every page in both themes. Runs in CI (`web` job). |
 | Real infrastructure (`web/tests/real`) | `npm run test:real` or `web/scripts/test-real.sh` | A deployed Ember with Authentik and test accounts | Gateway, API, web container, Redis session store and sign-in through the real Authentik. See [its README](web/tests/real/README.md). |
 
 The devcontainer image includes Playwright's Chromium and its system libraries

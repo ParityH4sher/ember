@@ -18,10 +18,13 @@
     label?: string;
     /** The app-wide launcher shortcut (Settings › Desktop), or null when it is off. */
     shortcut?: Shortcut | null;
+    /** Called on the shortcut before opening; returns true when something
+        else took it (a launcher widget shown in place on the page). */
+    intercept?: () => boolean;
     open?: boolean;
   }
   let {
-    children, enabled = true, size, label = 'Open app launcher', shortcut = null, open = $bindable(false)
+    children, enabled = true, size, label = 'Open app launcher', shortcut = null, intercept, open = $bindable(false)
   }: Props = $props();
 
   const panelId = 'app-launcher';
@@ -70,7 +73,8 @@
     if (open && e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); hide(true); return; }
     if (shortcut && !e.repeat && matchesShortcut(e, shortcut)) {
       e.preventDefault();
-      if (open) hide(true); else activate();
+      if (open) hide(true);
+      else if (!intercept?.()) activate();
     }
   }
   function onPointerdown(e: PointerEvent) {

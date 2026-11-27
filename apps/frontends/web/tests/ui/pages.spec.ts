@@ -15,6 +15,23 @@ test('dashboard shows status, counts, projects and services', async ({ page }) =
   await expect(service).toHaveAttribute('rel', 'noopener noreferrer');
 });
 
+test('the installed app starts on the desktop surface; the dashboard stays in the launcher', async ({ page, request }) => {
+  const response = await request.get('/manifest.webmanifest');
+  const manifestUrl = new URL(response.url());
+  const manifest = await response.json();
+  expect(manifest.start_url).toBe('./desktop/');
+  // start_url resolves against the manifest's URL, and must stay in scope.
+  const start = new URL(manifest.start_url, manifestUrl);
+  expect(start.pathname).toBe('/desktop/');
+  expect(start.pathname.startsWith(new URL(manifest.scope, manifestUrl).pathname)).toBe(true);
+  await page.goto(start.pathname);
+  await expect(page.getByRole('heading', { name: 'Desktop', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+KeyK');
+  const launcher = page.getByRole('dialog', { name: 'App launcher' });
+  await launcher.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await expect(page).toHaveURL('/');
+});
+
 test('account page shows the identity, session and provider link', async ({ page }) => {
   await page.goto('/account/');
   await expect(page.locator('#profile').getByText(ada.email!)).toBeVisible();

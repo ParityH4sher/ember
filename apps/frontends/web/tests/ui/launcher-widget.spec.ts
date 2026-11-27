@@ -91,13 +91,37 @@ test('arrow keys move through the grid and Enter launches', async ({ page }) => 
   await expect(page).toHaveURL('/apps/notes/');
 });
 
-test('the app-wide shortcut opens the same launcher, with the same apps and pins', async ({ page }) => {
+test('with a launcher shown in place, the shortcut focuses its search instead of opening the overlay', async ({ page }) => {
+  await open(page);
+  const shell = page.getByRole('dialog', { name: 'App launcher' });
+  await expect(search(page)).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K');
+  for (const key of ['Control+KeyK', 'Meta+KeyK']) {
+    await page.getByRole('heading', { name: 'Dashboard' }).click();
+    await expect(search(page)).not.toBeFocused();
+    await page.keyboard.press(key);
+    await expect(search(page)).toBeFocused();
+    await expect(shell).toHaveCount(0);
+  }
+  // In compact mode the widget is a button, not shown in place: the shortcut opens the overlay.
+  await page.getByRole('button', { name: 'Configure App launcher' }).click();
+  await page.getByRole('radio', { name: /Compact/ }).check();
+  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('heading', { name: 'Dashboard' }).click();
+  await page.keyboard.press('Control+KeyK');
+  await expect(shell.getByRole('searchbox', { name: 'Search apps' })).toBeFocused();
+  // Pressed again, the shortcut closes it.
+  await page.keyboard.press('Control+KeyK');
+  await expect(shell).toHaveCount(0);
+});
+
+test('on pages without a launcher widget the shortcut opens the same launcher, with the same apps and pins', async ({ page }) => {
   await open(page);
   // Pin in the widget...
   await appButton(page, 'All apps', 'Settings').click({ button: 'right' });
   await launcher(page).getByRole('menuitem', { name: 'Pin to top' }).click();
   // ...and the shell's launcher (Ctrl+K by default) shows it: one registry, one state.
-  await page.getByRole('heading', { name: 'Dashboard' }).click();
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   await page.keyboard.press('Control+KeyK');
   const shell = page.getByRole('dialog', { name: 'App launcher' });
   const shellSearch = shell.getByRole('searchbox', { name: 'Search apps' });
@@ -114,9 +138,9 @@ test('the app-wide shortcut opens the same launcher, with the same apps and pins
   await expect(shell).toHaveCount(0);
   // ⌘K works too, and Enter opens the top result.
   await page.keyboard.press('Meta+KeyK');
-  await shellSearch.fill('plugins');
+  await shellSearch.fill('profile');
   await shellSearch.press('Enter');
-  await expect(page).toHaveURL('/plugins/');
+  await expect(page).toHaveURL('/account/');
   await expect(shell).toHaveCount(0);
 });
 
@@ -133,9 +157,20 @@ test('the launcher shortcut is set once, in Settings', async ({ page }) => {
   await expect(field).toHaveValue('Ctrl+Alt+K');
   await expect(page.getByText('Saved in this browser.')).toBeVisible();
 
+  // The new shortcut focuses the launcher widget on the dashboard...
   await page.goto('/');
   await expect(search(page)).toBeVisible();
   const shell = page.getByRole('dialog', { name: 'App launcher' });
+  await page.keyboard.press('Control+KeyK');
+  await expect(search(page)).not.toBeFocused();
+  await expect(shell).toHaveCount(0);
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(search(page)).toBeFocused();
+  await expect(search(page)).toHaveAttribute('aria-keyshortcuts', 'Control+Alt+K');
+  await expect(shell).toHaveCount(0);
+  // ...and opens the centred launcher elsewhere.
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   await page.keyboard.press('Control+KeyK');
   await expect(shell).toHaveCount(0);
   await page.keyboard.press('Control+Alt+KeyK');
@@ -148,6 +183,11 @@ test('the launcher shortcut is set once, in Settings', async ({ page }) => {
   await field.press('Tab');
   await page.goto('/');
   await expect(search(page)).toBeVisible();
+  await expect(search(page)).not.toHaveAttribute('aria-keyshortcuts');
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(search(page)).not.toBeFocused();
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   await page.keyboard.press('Control+Alt+KeyK');
   await expect(shell).toHaveCount(0);
 });

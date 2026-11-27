@@ -10,7 +10,8 @@ There is one app launcher, with three ways to open it:
 - the **launcher circle** in the middle of the desktop surface (`/desktop/`)
   on the primary display
 - the **launcher shortcut**, **Ctrl+K** (**⌘K** on a Mac) by default, from
-  any page
+  any page: it focuses the search of a launcher widget shown on the page, and
+  otherwise opens the launcher in the centre of the screen
 - the **App launcher** [widget](widgets.md) on the dashboard, shown in place
   or as a compact button
 
@@ -25,6 +26,11 @@ Code: `apps/frontends/web/src/lib/apps/` (registry, launch targets, built-in
 apps), `src/lib/launcher/` (the launcher UI and widget) and
 `src/lib/desktop/` (the circle, its primary-display election), wired together
 in `src/lib/shell/AppShell.svelte`.
+
+The installed app starts on the desktop surface: the web app manifest's
+`start_url` is `./desktop/`, which resolves to `/desktop/` next to the
+manifest. The dashboard (`/`) stays one launch away as the built-in
+**Dashboard** app, and the brand link in the top bar still goes there.
 
 ## Registering apps
 
@@ -127,7 +133,7 @@ unless it is registered with `{ replace: true }`. Registration never throws.
 
 | Key | Where | Action |
 | --- | --- | --- |
-| **Ctrl+K** / **⌘K** (configurable) | Any page | Open the launcher (in the centre, or from the circle on the desktop) with the search focused; press again to close. |
+| **Ctrl+K** / **⌘K** (configurable) | Any page | With a launcher widget shown in place (grid mode) on the page, focus its search. Otherwise open the launcher (in the centre, or from the circle on the desktop) with the search focused; press again to close. |
 | Type | Search box | Filter. |
 | **Enter** | Search box | Open the top result. |
 | **↓** | Search box | Move to the first app. |
@@ -162,6 +168,20 @@ A shortcut must include Mod, Ctrl, Alt or Meta (or be F1–F12), so it cannot
 take over plain typing. Leave the field empty to turn the shortcut off; the
 circle and the widget still work.
 
+What the shortcut does depends on the page:
+
+- **A launcher widget is shown in place** (grid mode) and visible: the
+  shortcut scrolls it into view if needed and focuses its search. Nothing
+  opens on top of the launcher that is already there. With several, the
+  first one placed wins. A widget hidden with CSS, or on a board that is not
+  shown, does not count.
+- **Otherwise** (no widget, or only compact ones): the shortcut opens the
+  centred launcher, from the circle on the desktop surface, and pressing it
+  again closes it.
+
+Grid-mode widgets register themselves in `src/lib/launcher/inline.ts`;
+`LauncherCircle` asks them first (its `intercept` prop) before it opens.
+
 ## Configuration
 
 Open **Configure App launcher** on its title bar:
@@ -175,7 +195,8 @@ Open **Configure App launcher** on its title bar:
 
 Each placement keeps its own configuration. Placing two launchers, one grid
 and one compact, works. The keyboard shortcut is not a widget setting (see
-above).
+above); a grid-mode widget lists it on its search box
+(`aria-keyshortcuts`).
 
 ## Persistence and sync
 
@@ -219,13 +240,15 @@ launcher configuration.
 - `tests/unit/registry.spec.ts`: register, unregister, duplicates,
   replacement, validation, and each launch type.
 - `tests/unit/launcher.spec.ts`: search and ranking, pinned and recent
-  ordering, stale entries, grid navigation, and shortcut parsing (including
-  `Mod`).
+  ordering, stale entries, grid navigation, shortcut parsing (including
+  `Mod`), and which in-place launcher takes the shortcut.
 - `tests/ui/launcher-widget.spec.ts`: the widget in the built app. It covers
   search and Enter, keyboard navigation, the context menu by mouse, keyboard
   and touch, App info, pinning synced across two windows, recents, runtime
-  and invalid apps, and 250 apps. It also covers the app-wide shortcut
-  opening the same launcher with the same pins, setting the shortcut in
+  and invalid apps, and 250 apps. It also covers the shortcut focusing the
+  widget's search on the dashboard (and opening the centred launcher when the
+  widget is compact), the shortcut opening the same launcher with the same
+  pins on other pages, setting the shortcut in
   Settings, configuring, removing and re-adding the widget, and axe checks in
   both themes.
 - `tests/ui/launcher-circle.spec.ts`: the circle on `/desktop/`: centring,
@@ -233,3 +256,5 @@ launcher configuration.
   (search, app menu, App info, then the launcher), menu placement inside the
   centred panel, and axe checks with the launcher open.
 - `src/lib/desktop/election.test.ts` (`npm test`): the election rules.
+- `tests/ui/pages.spec.ts`: the manifest's `start_url` resolves to the
+  desktop surface, and the Dashboard opens from the launcher there.

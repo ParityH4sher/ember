@@ -811,3 +811,29 @@ Same environment as the entry above:
 
 Not run: the `web` CI job on GitHub, Firefox and Safari, a screen reader,
 and two physical displays (the election is covered by mocked tests only).
+
+## 2026-11-27 — installed app starts on the desktop; shortcut focuses an in-place launcher
+
+Follow-up to the entry above, before landing it:
+
+- The manifest's `start_url` is now `./desktop/` (resolves to `/desktop/`),
+  so the installed app opens on the desktop surface with the launcher circle.
+  The dashboard stays reachable as the built-in **Dashboard** app.
+- Ported from the closed `unify-launchers` branch (9075eda), only its
+  shortcut rule: when a launcher widget is shown in place (grid mode) and
+  visible, the launcher shortcut focuses that widget's search instead of
+  opening the centred launcher. Grid widgets register in
+  `src/lib/launcher/inline.ts`; `LauncherCircle` asks them through its new
+  `intercept` prop. Its second page list and overlay/host files were not
+  brought over. `primary-display.ts` and `election.ts` are unchanged.
+
+| Check | Node 22.23.5 (host) | Node 24.22.3 (`javascript-node:24-bookworm`, `CI=1`, clean `npm ci`) |
+| --- | --- | --- |
+| `npm run check` | 0 errors, 0 warnings. | 0 errors, 0 warnings. |
+| `npm test` | 6 passed. | 6 passed. |
+| `npm run test:unit` | 39 passed. | 39 passed. |
+| `npm run test:ui` | 79 passed. | 79 passed. |
+| `npm --prefix website run build` with `DOCS_BASE_URL=/ember/` | Built. | Not run. |
+
+Not run: Firefox and Safari, a screen reader, and an installed PWA launch
+(the `start_url` is covered by a test that resolves it and opens the page).

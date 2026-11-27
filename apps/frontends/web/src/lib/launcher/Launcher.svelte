@@ -4,11 +4,15 @@
   import type { WidgetProps } from '../widgets/types';
   import LauncherPanel from './LauncherPanel.svelte';
   import { launcherConfig, type LauncherConfig } from './config';
+  import { ariaShortcut, parseShortcut } from './keyboard';
+  import { registerInlineLauncher } from './inline';
+  import { prefs } from '../prefs.svelte';
 
   // The launcher widget. In grid mode the launcher is shown in place; in
   // compact mode a single button opens it as a popover (for a narrow,
-  // taskbar-like slot). The app-wide shortcut opens the shell's launcher
-  // (AppShell), not a particular widget.
+  // taskbar-like slot). The app-wide shortcut (AppShell) focuses the search of
+  // a launcher shown in place while one is visible; otherwise it opens the
+  // shell's centred launcher. Compact launchers never take the shortcut.
   let { config: stored, setConfig, context }: WidgetProps<LauncherConfig> = $props();
 
   const uid = $props.id();
@@ -16,6 +20,18 @@
   let open = $state(false);
   let panel = $state<LauncherPanel>(), toggle = $state<HTMLButtonElement>(), root = $state<HTMLElement>();
   let compact = $derived(config.mode === 'compact');
+  let shortcut = $derived(prefs.launcherShortcut ? parseShortcut(prefs.launcherShortcut) : null);
+
+  // Shown in place, this launcher takes the shortcut while it is visible.
+  $effect(() => {
+    if (compact) return;
+    return registerInlineLauncher(() => {
+      if (!root || !(root.checkVisibility?.({ visibilityProperty: true }) ?? root.getClientRects().length > 0)) return false;
+      root.scrollIntoView({ block: 'nearest' });
+      panel?.focusSearch();
+      return true;
+    });
+  });
 
   // The popover is fixed to the viewport, so the widget's scrolling body does
   // not clip it; it follows the button on scroll and resize.
@@ -53,7 +69,7 @@
       </div>
     {/if}
   {:else}
-    <LauncherPanel bind:this={panel} {config} {setConfig} {context} />
+    <LauncherPanel bind:this={panel} {config} {setConfig} {context} shortcut={shortcut ? ariaShortcut(shortcut) : undefined} />
   {/if}
 </div>
 

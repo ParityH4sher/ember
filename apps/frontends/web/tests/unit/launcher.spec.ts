@@ -8,6 +8,7 @@ import {
   ariaShortcut, DEFAULT_SHORTCUT, displayShortcut, formatShortcut, matchesShortcut, moveFocus, parseShortcut
 } from '../../src/lib/launcher/keyboard';
 import { launcherConfig } from '../../src/lib/launcher/config';
+import { focusInlineLauncher, registerInlineLauncher } from '../../src/lib/launcher/inline';
 
 const app = (id: string, name: string, extra: Partial<AppDefinition> = {}): AppDefinition =>
   ({ id, name, launch: { type: 'internal', path: `/${id}/` }, ...extra });
@@ -191,4 +192,21 @@ test.describe('shortcuts', () => {
 test('launcher config falls back field by field and drops the old per-widget shortcut', () => {
   expect(launcherConfig({ mode: 'compact', recentLimit: 99, showRecent: 'yes', category: '', shortcut: 'Alt+Shift+L' } as never))
     .toEqual({ mode: 'compact', showRecent: true, recentLimit: 12, category: 'all' });
+});
+
+test('the shortcut goes to the first launcher shown in place that can take focus', () => {
+  const calls: string[] = [];
+  expect(focusInlineLauncher()).toBe(false);
+  const hidden = registerInlineLauncher(() => { calls.push('hidden'); return false; });
+  expect(focusInlineLauncher()).toBe(false);
+  const shown = registerInlineLauncher(() => { calls.push('shown'); return true; });
+  const later = registerInlineLauncher(() => { calls.push('later'); return true; });
+  expect(focusInlineLauncher()).toBe(true);
+  expect(calls).toEqual(['hidden', 'hidden', 'shown']);
+  shown();
+  calls.length = 0;
+  expect(focusInlineLauncher()).toBe(true);
+  expect(calls).toEqual(['hidden', 'later']);
+  hidden(); later();
+  expect(focusInlineLauncher()).toBe(false);
 });

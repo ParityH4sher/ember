@@ -12,6 +12,7 @@
   import LauncherPanel from '../launcher/LauncherPanel.svelte';
   import { defaultLauncherConfig, type LauncherConfig } from '../launcher/config';
   import { ariaShortcut, parseShortcut } from '../launcher/keyboard';
+  import { focusInlineLauncher } from '../launcher/inline';
   import { browserOpeners, launchById, type Openers } from '../apps/launch';
   import type { WidgetContext } from '../widgets/types';
 
@@ -26,6 +27,8 @@
   // The app-wide launcher: the circle (on the desktop surface) and the
   // shortcut (everywhere) open the same launcher UI as the launcher widget,
   // reading the same app registry. Its tab choice lasts for the session.
+  // When a launcher widget is shown in place, the shortcut focuses its search
+  // instead (focusInlineLauncher).
   let circle = $state<LauncherCircle>();
   let shortcut = $derived(prefs.launcherShortcut ? parseShortcut(prefs.launcherShortcut) : null);
   let launcherConfig = $state<LauncherConfig>({ ...defaultLauncherConfig });
@@ -70,7 +73,8 @@
   </main>
 </div>
 
-<LauncherCircle bind:this={circle} enabled={desktop && prefs.launcherCircle} {shortcut} bind:open={launcher}>
+<LauncherCircle bind:this={circle} enabled={desktop && prefs.launcherCircle} {shortcut}
+  intercept={focusInlineLauncher} bind:open={launcher}>
   <LauncherPanel config={launcherConfig} setConfig={change => Object.assign(launcherConfig, change)} {context}
     shortcut={shortcut ? ariaShortcut(shortcut) : undefined} onclose={() => circle?.close()} onlaunch={() => (launcher = false)} />
 </LauncherCircle>
