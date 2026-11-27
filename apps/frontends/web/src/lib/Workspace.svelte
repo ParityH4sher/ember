@@ -15,12 +15,20 @@
     let display = new URLSearchParams(location.search).get('display') ?? '';
     let details: d.ScreenDetails | null = null;
     let notesSeen = false;
+    // Identity for duplicate detection: after a relaunch, Notes may open a
+    // second workspace for a screen before the first one has announced itself.
+    const id = crypto.randomUUID();
+    const since = performance.timeOrigin;
+    let duplicate = false;
     const channel = typeof BroadcastChannel === 'undefined' ? null : d.channel();
     const send = (message: d.Message) => channel?.postMessage(message);
-    const announce = () => { if (display) send({ type: 'workspace', display }); };
+    const announce = () => { if (display && !duplicate) send({ type: 'workspace', display, id, since }); };
     const place = () => {
       const target = details?.screens.find(s => d.screenKey(s) === display);
       if (target) d.fit(window, target);
+      // If the browser kept this window elsewhere, say where it really is, so
+      // Notes sees the intended screen as still without a window.
+      setTimeout(moved, 500);
     };
     // If the user drags this window to another screen, it now belongs there.
     const moved = () => {
@@ -32,10 +40,16 @@
       replaceState(d.workspaceUrl(key), {});
       announce();
     };
-    const leave = () => { if (display) send({ type: 'bye', display }); };
+    const leave = () => { if (display && !duplicate) send({ type: 'bye', display }); };
 
     if (channel) channel.onmessage = ({ data }: MessageEvent<d.Message>) => {
       if (data.type === 'query') announce();
+      else if (data.type === 'workspace' && data.display === display && data.id !== id) {
+        // Another workspace claims this screen. The newer one closes without a
+        // 'bye' (the screen stays covered); the older one answers so the newer sees it.
+        if (d.yields({ id, since }, data)) { duplicate = true; window.close(); }
+        else announce();
+      }
       else if (data.type === 'notes') notesSeen = true;
       else if (data.type === 'arrange') place();
     };

@@ -34,7 +34,7 @@ export class DisplayManager {
     channel.onmessage = ({ data }: MessageEvent<d.Message>) => {
       if (data.type === 'query') channel.postMessage({ type: 'notes' } satisfies d.Message);
       else if (data.type === 'workspace') { this.#live.add(data.display); this.#recount(); }
-      else if (data.type === 'bye') { this.#live.delete(data.display); this.#recount(); }
+      else if (data.type === 'bye') { this.#live.delete(data.display); this.#gap(); }
     };
     channel.postMessage({ type: 'query' } satisfies d.Message);
 
@@ -50,7 +50,9 @@ export class DisplayManager {
   }
 
   async #launch(signal: AbortSignal) {
-    await wait(300); // let already open workspaces answer the query
+    // Let already open workspaces answer the query. After a relaunch they load
+    // alongside this window, so give them time; late ones still dedupe themselves.
+    await wait(1000);
     if (signal.aborted) return;
     const state = await d.permission();
     if (state === 'granted') {
@@ -90,6 +92,14 @@ export class DisplayManager {
       if (d.openWorkspace(s)) this.#live.add(d.screenKey(s)); else blocked++;
     }
     this.offer = blocked ? { kind: 'remaining', count: blocked } : null;
+  }
+
+  /** A workspace closed or left its screen: offer to fill the gap (one click). */
+  #gap() {
+    if (this.offer?.kind === 'setup' || !this.startup || !this.#details) return this.#recount();
+    const count = this.#missing().length;
+    if (count) this.offer = { kind: 'remaining', count };
+    else this.#recount();
   }
 
   /** Keep an open "remaining"/"new" banner accurate; close it when nothing is missing. */

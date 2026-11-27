@@ -63,9 +63,14 @@ export type Message =
   | { type: 'query' }
   | { type: 'arrange' }
   | { type: 'notes' }
-  | { type: 'workspace'; display: string }
+  | { type: 'workspace'; display: string; id: string; since: number }
   | { type: 'bye'; display: string };
 export const channel = () => new BroadcastChannel('ember-displays');
+
+/** Two workspaces claim the same screen: whether `me` should close in favour of
+ * `other`. The newer one gives way (ties broken by id), so exactly one survives. */
+export const yields = (me: { id: string; since: number }, other: { id: string; since: number }) =>
+  me.id !== other.id && (me.since > other.since || (me.since === other.since && me.id > other.id));
 
 const setting = 'ember.displays.openAtStartup';
 const dismissed = 'ember.displays.promptDismissed';
