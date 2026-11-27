@@ -38,6 +38,8 @@ website/              Docusaurus documentation site
 
 See [architecture](docs/architecture/README.md) for boundaries and
 [operations](docs/operations/README.md) for deployment and recovery procedures.
+The web app's dashboard is a board of [widgets](docs/widgets.md). The first is
+the [app launcher](docs/app-launcher.md), which opens any app registered with it.
 The detailed POC handoff for an implementation agent is
 [EMBER_POC_IMPLEMENTATION_BRIEF.md](EMBER_POC_IMPLEMENTATION_BRIEF.md).
 

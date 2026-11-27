@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test src/lib/**/*.test.ts",
+    "test:unit": "playwright test -c playwright.unit.config.ts",
     "test:ui": "playwright test",
     "test:real": "playwright test -c playwright.real.config.ts"
   },

@@ -41,6 +41,12 @@ internals or introduce feature-specific server routes outside the contract.
 The shell can compose enabled modules into one experience; a module should not
 require every other feature to be installed.
 
+The web app has two small, compile-time extension points so far: a
+[widget registry](../widgets.md) for dashboard widgets, and an
+[app registry](../app-launcher.md) the app launcher reads. Both validate
+entries and ignore bad ones with a warning. Neither loads code from outside the
+build.
+
 ## Plugins and integrations
 
 A plugin is an extension boundary, not an automatic grant of authority. An

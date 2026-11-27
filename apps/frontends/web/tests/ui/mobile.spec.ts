@@ -18,6 +18,18 @@ test('the sidebar is a drawer that closes after navigating', async ({ page, api 
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
+test('the dashboard and its app launcher fit a phone', async ({ page, api }) => {
+  signedIn(api);
+  await page.goto('/');
+  const launcher = page.getByRole('region', { name: 'App launcher' });
+  await expect(launcher.getByRole('button', { name: 'Authentik', exact: true })).toBeVisible();
+  // A touch long-press opens the app menu instead of launching.
+  await launcher.getByRole('button', { name: 'Settings', exact: true }).dispatchEvent('pointerdown', { pointerType: 'touch', isPrimary: true });
+  await expect(launcher.getByRole('menu', { name: 'Actions for Settings' })).toBeInViewport();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test('the sign-in page fits a phone', async ({ page, api: _ }) => {
   await page.goto('/login/');
   await expect(page.getByRole('button', { name: 'Sign in with Authentik' })).toBeInViewport();
