@@ -81,6 +81,13 @@ clicks you need:
   may not know the old window names, so the announcements are what prevent
   duplicates. The manifest's `"launch_handler": {"client_mode": "focus-existing"}`
   focuses the most recently used Ember window instead of opening a new one.
+  Notes waits about a second for these announcements. A workspace that
+  announces later and finds another workspace on its screen closes itself
+  (the newer one gives way), so each display ends up with exactly one.
+- **Wrong screen:** if the browser keeps a new workspace off its target
+  screen, the workspace takes on the identity of the screen it is really on.
+  Notes then counts the target as missing and offers **Open on remaining
+  displays**, as it does when you close a workspace.
 - **Primary:** the Notes window holding the Web Lock `ember-displays-primary`
   runs the startup setup and watches for display changes. Other Notes windows
   wait for the lock.
