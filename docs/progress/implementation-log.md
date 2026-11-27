@@ -754,3 +754,29 @@ Authentik is reachable from here), the `ember-e2e` blueprint in Authentik
 (the `password` attribute and group lookup are untested), the devcontainer
 image rebuild, `scripts/test-real.sh` (no Podman or Docker here), the `web`
 CI job on GitHub, and the web image's `nginx.conf` in a container.
+
+## 2026-11-27 — widget board and app launcher
+
+Added a widget contract and registry (`web/src/lib/widgets/`), an app
+registry with validated launch targets (`lib/apps/`), and the app launcher
+as the first widget (`lib/launcher/`), hosted on a board on the dashboard.
+There is no multi-display feature yet; the widget context has an optional
+`displays` hook for it. No dependencies were added: unit tests run in Node
+with Playwright's runner (`playwright.unit.config.ts`). See
+[widgets](../widgets.md) and [app launcher](../app-launcher.md).
+
+Run in `mcr.microsoft.com/devcontainers/javascript-node:24-bookworm` (Node
+24.22.3) with Playwright 1.64.1's Chromium, under rootless Podman:
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | 0 errors, 0 warnings. |
+| `npm run build` | Static site written. |
+| `npm run test:unit` | 37 passed. The first run found that a registry warning could throw on an entry with a throwing `id` getter; fixed. |
+| `npm run test:ui --repeat-each 3` | 183 passed (61 tests: the 42 existing, 18 launcher, 1 phone). The first runs found an effect loop with zero search results (caught by the widget's error boundary) and a missing space in the "(pinned)" label; both fixed. |
+| `npm --prefix website run build` with `DOCS_BASE_URL=/ember/` | Built; no broken links. |
+| Screenshots: dashboard, settings and compact popover (dark, light), 390 px phone | Reviewed. |
+
+Not run: the `web` CI job on GitHub, the real-infrastructure suite, Safari
+and Firefox (Chromium only), and a screen reader (labels, roles and live
+regions are checked by tests and axe only).

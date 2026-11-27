@@ -68,6 +68,10 @@ Start with the [sandboxing overview](sandboxing/README.md), then choose a topic:
   grouped by area and distinguished from what this repository implements today.
 - [Plugins](plugins.md): the list of wanted plugins and the Weather plugin as
   the worked example for adding one.
+- [Widgets](widgets.md): the web app's widget contract and how to build and
+  register a widget for the dashboard.
+- [App launcher](app-launcher.md): registering apps (at startup and at
+  runtime), launch targets, keyboard shortcuts and configuration.
 - [Gaps and improvements](gaps-and-improvements.md): prioritized lessons from
   the reference system, kept separate from this repository's implementation status.
 - [Inspiration](inspiration.md): design tools, fabrication systems, workshop

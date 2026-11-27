@@ -4,6 +4,9 @@
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import Stat from '../lib/ui/Stat.svelte';
   import ServiceLinks from '../lib/ServiceLinks.svelte';
+  import WidgetBoard from '../lib/widgets/WidgetBoard.svelte';
+  import { browserOpeners, type Openers } from '../lib/apps/launch';
+  import { goto } from '$app/navigation';
   import {
     getHealth, listAgents, listPlugins, listProjects,
     type AgentList, type Health, type Plugin, type Project
@@ -18,6 +21,9 @@
   const count = <T,>(v: Loaded<T[]>) => v === undefined ? undefined : failure(v) ? '—' : v.length;
   let activePlugins = $derived(Array.isArray(plugins) ? plugins.filter(p => p.active).length : undefined);
   let needsSetup = $derived(Array.isArray(plugins) ? plugins.filter(p => !p.configured).length : 0);
+
+  // Apps open Ember pages with client-side navigation, other sites in a new tab.
+  const openers: Openers = { ...browserOpeners, openInternal: path => goto(path) };
 
   onMount(() => {
     settle(getHealth(), v => (health = v));
@@ -75,6 +81,8 @@
     </ul>
   </Card>
 </div>
+
+<WidgetBoard initial={['ember.launcher']} {openers} />
 
 <style>
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: var(--space); margin-bottom: var(--space) }

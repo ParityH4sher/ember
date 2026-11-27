@@ -43,6 +43,12 @@ Shared code lives in `web/src/lib/`:
 - `PluginCard.svelte`, `ActionForm.svelte` and `SchemaFields.svelte` with
   `schema.ts`, which build plugin forms from the JSON Schemas the API
   publishes, and `ServiceLinks.svelte`.
+- `widgets/`: the widget contract, `widgetRegistry` and the `WidgetBoard`
+  the dashboard hosts. See [widgets](../../docs/widgets.md).
+- `apps/`: the app registry (`registerApp`), launch targets and the static
+  app list. `launcher/` is the app launcher widget. See
+  [app launcher](../../docs/app-launcher.md).
+- `setup.ts`: registers the built-in widgets and apps (the composition root).
 
 Colours are tokens in `app.css` with a dark and a light set; use the tokens,
 not literal colours. The browser loads no plugin code or remote HTML. Sign-in
@@ -53,7 +59,8 @@ token. Hiding admin controls is a convenience; the API enforces roles.
 
 | Suite | Command | Needs | Covers |
 | --- | --- | --- | --- |
-| UI (`web/tests/ui`) | `npm run test:ui` | Node, Playwright's Chromium | The built app on `vite preview` with a mocked API: sign-in page and `returnTo`, roles, user menu, every page, session expiry, theme, 404, phone layout, and axe WCAG 2.1 AA checks on every page in both themes. Runs in CI (`web` job). |
+| Unit (`web/tests/unit`) | `npm run test:unit` | Node | Plain TypeScript modules without a browser: the widget and app registries and their validation, launcher search and ordering, pinned/recent state, keyboard navigation and shortcuts. Runs in CI (`web` job). |
+| UI (`web/tests/ui`) | `npm run test:ui` | Node, Playwright's Chromium | The built app on `vite preview` with a mocked API: sign-in page and `returnTo`, roles, user menu, every page, session expiry, theme, 404, phone layout, the app launcher widget (search, keyboard, pinning, cross-window sync, runtime apps, configure/remove/add), and axe WCAG 2.1 AA checks on every page in both themes. Runs in CI (`web` job). |
 | Real infrastructure (`web/tests/real`) | `npm run test:real` or `web/scripts/test-real.sh` | A deployed Ember with Authentik and test accounts | Gateway, API, web container, Redis session store and sign-in through the real Authentik. See [its README](web/tests/real/README.md). |
 
 The devcontainer image includes Playwright's Chromium and its system libraries
