@@ -1,0 +1,243 @@
+---
+# Chat runs start containers on this host, so only signed-in users may start them.
+- name: Require sign-in and 1 to 16 agents for project chat
+  ansible.builtin.assert:
+    that:
+      - ember_oidc_enabled | default(false) | bool
+      - sandbox_router_agent_count | int >= 1
+      - sandbox_router_agent_count | int <= 16
+    fail_msg: >-
+      ember_agents_enabled needs Ember sign-in (ember_oidc_enabled) and 1 to 16
+      agents: sandbox_router_fixture and the entries of sandbox_router_agents.
+    quiet: true
+  vars:
+    sandbox_router_agent_count: >-
+      {{ sandbox_router_agents | length + (1 if sandbox_router_fixture | bool else 0) }}
+
+# The API repeats the name check when it starts and refuses invalid agents.
+- name: Require valid extra agents
+  ansible.builtin.assert:
+    that:
+      - item.id is defined and item.id is match('^[a-z][a-z0-9-]{0,62}$')
+      - item.id != 'chat-fixture' or not (sandbox_router_fixture | bool)
+      - item.id not in (sandbox_router_agents[:index] | map(attribute='id'))
+      - item.name is defined and item.name | length >= 1 and item.name | length <= 80
+      - item.image is defined and item.image is match('^sha256:[0-9a-f]{64}$')
+      - item.profile is not defined or item.profile == 'trusted'
+    fail_msg: >-
+      Each sandbox_router_agents entry needs a unique id matching
+      ^[a-z][a-z0-9-]{0,62}$, a name of 1 to 80 printable characters and an
+      image sha256:<64 hex>. This role supports only the trusted profile.
+    quiet: true
+  loop: "{{ sandbox_router_agents }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.id | default('?') }}"
+
+- name: Install rootless Podman
+  ansible.builtin.apt:
+    name:
+      - podman
+      - uidmap
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the router's client group
+  ansible.builtin.group:
+    name: "{{ sandbox_router_client_group }}"
+    system: true
+
+- name: Create the router user
+  ansible.builtin.user:
+    name: "{{ sandbox_router_user }}"
+    system: true
+    groups: "{{ sandbox_router_client_group }}"
+    append: true
+    home: "{{ sandbox_router_home }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+
+- name: Keep the router's home private
+  ansible.builtin.file:
+    path: "{{ sandbox_router_home }}"
+    state: directory
+    owner: "{{ sandbox_router_user }}"
+    group: "{{ sandbox_router_user }}"
+    mode: "0700"
+
+- name: Give the router user subordinate IDs for rootless Podman
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    regexp: "^{{ sandbox_router_user }}:"
+    line: "{{ sandbox_router_user }}:{{ sandbox_router_subid_start }}:{{ sandbox_router_subid_count }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - /etc/subuid
+    - /etc/subgid
+  notify: Update rootless Podman after a subordinate ID change
+
+- name: Read the router user's IDs
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ sandbox_router_user }}"
+  check_mode: false  # read-only; the unit and Podman calls need the UID
+
+- name: Read the client group's GID
+  ansible.builtin.getent:
+    database: group
+    key: "{{ sandbox_router_client_group }}"
+  check_mode: false  # read-only; the ember role needs the GID in check mode
+
+- name: Record the router's IDs and agents for the ember role
+  ansible.builtin.set_fact:
+    sandbox_router_uid: "{{ ansible_facts.getent_passwd[sandbox_router_user][1] }}"
+    sandbox_router_gid: "{{ ansible_facts.getent_group[sandbox_router_client_group][1] }}"
+    sandbox_router_socket_dir_fact: "{{ sandbox_router_socket_dir }}"
+    # The ember role writes only each agent's id and name to agents.json.
+    sandbox_router_chat_agents: >-
+      {{ ([{'id': 'chat-fixture', 'name': 'Offline fixture'}] if sandbox_router_fixture | bool else [])
+         + sandbox_router_agents }}
+
+# Starts the user's systemd instance at boot, which rootless Podman needs.
+- name: Let the router user's services run without a login
+  ansible.builtin.command:
+    argv: [loginctl, enable-linger, "{{ sandbox_router_user }}"]
+    creates: "/var/lib/systemd/linger/{{ sandbox_router_user }}"
+
+- name: Start the router user's systemd instance
+  ansible.builtin.systemd_service:
+    name: "user@{{ sandbox_router_uid }}.service"
+    state: started
+
+# Before the first Podman build below.
+- name: Apply subordinate ID changes
+  ansible.builtin.meta: flush_handlers
+
+# 0710: members of the client group can reach the socket but not list,
+# create or delete anything here. The router checks this when it starts.
+- name: Create the router socket directory
+  ansible.builtin.file:
+    path: "{{ sandbox_router_socket_dir }}"
+    state: directory
+    owner: "{{ sandbox_router_user }}"
+    group: "{{ sandbox_router_client_group }}"
+    mode: "0710"
+
+- name: Create the router installation directories
+  ansible.builtin.file:
+    path: "{{ sandbox_router_install_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: ["", bin, src, src/chat-fixture]
+
+- name: Copy the router source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../services/sandbox-router/{{ item }}"
+    dest: "{{ sandbox_router_install_dir }}/src/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - go.mod
+    - main.go
+    - runtime.go
+    - chat-fixture/Dockerfile
+    - chat-fixture/agent.py
+  register: sandbox_router_source
+
+- name: Check for the router binary
+  ansible.builtin.stat:
+    path: "{{ sandbox_router_install_dir }}/bin/sandbox-router"
+  register: sandbox_router_binary
+
+# The standard library only, so the build needs no network.
+- name: Build the router
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --volume={{ sandbox_router_install_dir }}/src:/src:ro
+      - --volume={{ sandbox_router_install_dir }}/bin:/out
+      - --workdir=/src
+      - --env=CGO_ENABLED=0
+      - --env=GOCACHE=/tmp/go-cache
+      - --env=GOFLAGS=-buildvcs=false
+      - "{{ sandbox_router_go_image }}"
+      - go
+      - build
+      - -trimpath
+      - -ldflags=-s -w
+      - -o
+      - /out/sandbox-router
+      - .
+  when: sandbox_router_source is changed or not sandbox_router_binary.stat.exists
+  register: sandbox_router_build
+  changed_when: true
+
+- name: Build the offline chat fixture
+  ansible.builtin.command:
+    argv: "{{ sandbox_router_podman + ['build', '--tag', 'localhost/ember-chat-fixture:dev',
+                                       sandbox_router_install_dir ~ '/src/chat-fixture'] }}"
+    chdir: "{{ sandbox_router_home }}"
+  # Cached layers make this fast; the policy below records whether the ID changed.
+  changed_when: false
+  when: sandbox_router_fixture | bool
+
+- name: Read the chat fixture's image ID
+  ansible.builtin.command:
+    argv: "{{ sandbox_router_podman + ['image', 'inspect', 'localhost/ember-chat-fixture:dev'] }}"
+    chdir: "{{ sandbox_router_home }}"
+  register: sandbox_router_fixture_image
+  changed_when: false
+  failed_when: false  # absent before the first real run; required below
+  check_mode: false  # read-only; the policy diff needs it in check mode
+  when: sandbox_router_fixture | bool
+
+- name: Require the chat fixture image
+  ansible.builtin.assert:
+    that:
+      - sandbox_router_fixture_image.rc == 0
+    fail_msg: localhost/ember-chat-fixture:dev is missing from {{ sandbox_router_user }}'s Podman storage.
+    quiet: true
+  when:
+    - sandbox_router_fixture | bool
+    - not ansible_check_mode
+
+- name: Write the router policy
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: "{{ sandbox_router_install_dir }}/policy.json"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    sandbox_router_fixture_id: >-
+      {{ ((sandbox_router_fixture_image.stdout | from_json)[0].Id | regex_replace('^sha256:', ''))
+         if (sandbox_router_fixture_image.rc | default(1)) == 0 else '' }}
+  register: sandbox_router_policy_file
+
+- name: Install the router service
+  ansible.builtin.template:
+    src: ember-sandbox-router.service.j2
+    dest: /etc/systemd/system/ember-sandbox-router.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: sandbox_router_unit
+
+- name: Run the router
+  ansible.builtin.systemd_service:
+    name: ember-sandbox-router.service
+    enabled: true
+    state: >-
+      {{ 'restarted' if (sandbox_router_build is changed or sandbox_router_policy_file is changed
+                         or sandbox_router_unit is changed) else 'started' }}
+    daemon_reload: "{{ sandbox_router_unit is changed }}"

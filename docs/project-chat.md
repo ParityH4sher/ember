@@ -24,7 +24,8 @@ an open decision: [DEC-009](planning/human-decisions.md#dec-009---agent-chat-fro
 | Conversation history in each run, oldest messages left out above 32 KiB | Project notes or files inside the sandbox |
 | Transcripts as plain JSON files in the project | Durable run records, recovery of a run after an API restart |
 | Fixed, user-safe error messages; the router run ID is kept for the operator | Per-user agents, message authors, project-scoped roles |
-| An offline fixture agent for testing the whole path | The router in the Compose deployment |
+| An offline fixture agent for testing the whole path | The `isolated` profile in the Ansible deployment |
+| The Compose deployment with a host router (`deploy/compose.agents.yaml`, Ansible `ember_agents_enabled`) | |
 
 Because agents have no network yet, an agent can only answer from what is in
 its image and the envelope. The included fixture answers with a fixed
@@ -85,9 +86,76 @@ The API cannot read the router's policy. A listed `id` that the router does not
 know produces "This agent is not registered with the sandbox router." when a
 message is sent.
 
-The Compose deployment does not mount a router socket yet (plan phase P8). The
-API container runs as UID 65532 and cannot reach the router's operator-only
-socket.
+## Turn on chat in a deployment
+
+The router stays a host process, because it starts containers with the host's
+rootless Podman. The API container (UID 65532) reaches its socket through a
+shared group: the router's `-client-group` option makes the socket directory
+mode `0710` and the socket `0660`, both owned by that group, and
+`deploy/compose.agents.yaml` adds the API to the group and mounts the
+directory at `/run/ember-router`. Chat needs [sign-in](authentication.md) in a
+deployment; the installer and Ansible refuse it without.
+
+### With Ansible
+
+Set these for the host, for example in its `group_vars`, and run
+`playbooks/site.yml`:
+
+```yaml
+ember_oidc_enabled: true      # already on with the Authentik stack
+ember_agents_enabled: true
+```
+
+The `sandbox_router` role then installs Podman, creates the `ember-router` user
+(with subordinate IDs and lingering) and the `ember-agents` group, builds the
+router in the pinned Go image with no network and the offline fixture in
+`ember-router`'s Podman storage, writes `/opt/ember-router/policy.json`, and
+runs `ember-sandbox-router.service`. The `ember` role writes
+`/opt/ember/config/agents.json` and adds the overlay. Every agent uses the
+`trusted` profile. To register your own agents, build their images as
+`ember-router` and list them in `sandbox_router_agents`
+(`roles/sandbox_router/defaults/main.yml`); set `sandbox_router_fixture: false`
+to drop the fixture.
+
+Check it on the host:
+
+```sh
+systemctl status ember-sandbox-router
+sudo ls -l /var/lib/ember-router-socket   # srw-rw---- ember-router ember-agents router.sock
+```
+
+then send a message in a project chat, signed in.
+
+### With install.sh
+
+Run the router as an operator account that belongs to a dedicated group, for
+example `ember-agents`, with its socket in a persistent directory (not under
+`/run`, which would be replaced on restart and leave the API's mount empty):
+
+```sh
+sudo install -d -o "$USER" -g ember-agents -m 0710 /var/lib/ember-router-socket
+rm -f /var/lib/ember-router-socket/router.sock
+router -config policy.json -socket /var/lib/ember-router-socket/router.sock -client-group ember-agents
+```
+
+Write the agents file with the **container** path of the socket:
+
+```json
+{"routerSocket": "/run/ember-router/router.sock",
+ "agents": [{"id": "chat-fixture", "name": "Offline fixture"}]}
+```
+
+and install with sign-in configured as well:
+
+```sh
+EMBER_AUTH_CONFIG_FILE=… EMBER_OIDC_CLIENT_SECRET_FILE=… \
+EMBER_AGENTS_CONFIG_FILE=/etc/ember/agents.json \
+EMBER_ROUTER_SOCKET_DIR=/var/lib/ember-router-socket ./install.sh
+```
+
+`EMBER_ROUTER_GID` defaults to the group of `EMBER_ROUTER_SOCKET_DIR`. The
+agents file must be readable by UID 65532. A changed agents file takes effect
+when the API restarts.
 
 ## Packaging an agent for chat
 

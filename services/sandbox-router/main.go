@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -116,7 +118,7 @@ func handler(agents map[string]agent, launch launchFunc) http.Handler {
 	return mux
 }
 
-func serve(config, socket string) error {
+func serve(config, socket string, clientGID int) error {
 	if os.Geteuid() == 0 {
 		return errors.New("run as a non-root operator")
 	}
@@ -133,8 +135,8 @@ func serve(config, socket string) error {
 	if err != nil {
 		return err
 	}
-	if !dir.IsDir() || dir.Mode().Perm() != 0700 || dir.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
-		return errors.New("socket directory must be operator-owned and mode 0700")
+	if err := checkSocketDir(dir, os.Geteuid(), clientGID); err != nil {
+		return err
 	}
 	// Empty Docker client config: do not inject proxies from ~/.docker/config.json.
 	clientDir, err := os.MkdirTemp("", "ember-docker-client-")
@@ -142,16 +144,28 @@ func serve(config, socket string) error {
 		return err
 	}
 	defer os.RemoveAll(clientDir)
+	// Before listening, so a signal never interrupts an unattended socket.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// The socket is created as 0600 whatever the inherited umask.
+	old := syscall.Umask(0177)
 	l, err := net.Listen("unix", socket)
+	syscall.Umask(old)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
-	if err := os.Chmod(socket, 0600); err != nil {
+	// The group is set before the mode grants it access.
+	mode := os.FileMode(0600)
+	if clientGID >= 0 {
+		if err := os.Chown(socket, -1, clientGID); err != nil {
+			return fmt.Errorf("give the socket to the client group (the operator must be a member): %w", err)
+		}
+		mode = 0660
+	}
+	if err := os.Chmod(socket, mode); err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	s := &http.Server{
 		Handler:     handler(agents, runtimeLauncher{clientDir}.run),
 		BaseContext: func(net.Listener) context.Context { return ctx },
@@ -176,12 +190,59 @@ func serve(config, socket string) error {
 func main() {
 	config := flag.String("config", "", "operator agent policy JSON file")
 	socket := flag.String("socket", "", "Unix socket path under a private directory")
+	clientGroup := flag.String("client-group", "", "group name or GID that may also connect (socket 0660, directory 0710)")
 	flag.Parse()
 	if *config == "" || *socket == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := serve(*config, *socket); err != nil {
+	clientGID, err := lookupGroup(*clientGroup)
+	if err != nil {
 		log.Fatal(err)
 	}
+	if err := serve(*config, *socket, clientGID); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// lookupGroup resolves -client-group. An empty name means no client group: -1.
+func lookupGroup(name string) (int, error) {
+	if name == "" {
+		return -1, nil
+	}
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		if _, numeric := err.(user.UnknownGroupError); !numeric {
+			return 0, err
+		}
+		if g, err = user.LookupGroupId(name); err != nil {
+			return 0, fmt.Errorf("client group %q: %w", name, err)
+		}
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil || gid <= 0 {
+		return 0, fmt.Errorf("client group %q must not be root's group", name)
+	}
+	return gid, nil
+}
+
+// checkSocketDir requires a directory owned by the operator that nobody else
+// can list. Without a client group it is mode 0700. With one, it is mode 0710
+// and owned by that group, so its members can reach the socket but not list,
+// create or remove anything in the directory.
+func checkSocketDir(dir os.FileInfo, euid, clientGID int) error {
+	st, ok := dir.Sys().(*syscall.Stat_t)
+	if !dir.IsDir() || !ok || st.Uid != uint32(euid) {
+		return errors.New("socket directory must be an operator-owned directory")
+	}
+	if clientGID < 0 {
+		if dir.Mode().Perm() != 0700 {
+			return errors.New("socket directory must be mode 0700")
+		}
+		return nil
+	}
+	if dir.Mode().Perm() != 0710 || st.Gid != uint32(clientGID) {
+		return fmt.Errorf("with -client-group, the socket directory must be mode 0710 and owned by group %d", clientGID)
+	}
+	return nil
 }

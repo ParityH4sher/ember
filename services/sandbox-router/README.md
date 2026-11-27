@@ -13,11 +13,18 @@ image contract; neither depends on a particular agent vendor.
 The service listens on an operator-only Unix socket. Anyone with access may
 invoke any registered agent; keep code-executing agents exclusively under
 `isolated`. If Kata is unavailable, the request fails. No default runtime
-retry. The Compose installer does not connect to this prototype. The Ember API
-calls `/v1/runs` for [project chat](../../docs/project-chat.md) only when the
-operator gives it an agents file naming this socket, and then only with sign-in
-on (or an explicit loopback-development opt-in). `chat-fixture/` is an offline
-agent for that path.
+retry. The Ember API calls `/v1/runs` for
+[project chat](../../docs/project-chat.md) only when the operator gives it an
+agents file naming this socket, and then only with sign-in on (or an explicit
+loopback-development opt-in). `chat-fixture/` is an offline agent for that path.
+
+By default the socket directory must be operator-owned with mode `0700`, and
+the socket is `0600`. `-client-group NAME|GID` shares the socket with one
+group instead: the directory must then be mode `0710` and owned by that group,
+the operator must belong to it, and the socket becomes `0660`. The Compose
+deployment uses this to let the API container connect
+(`deploy/compose.agents.yaml`). Every member of the group can run every
+registered agent.
 
 ## Try it
 

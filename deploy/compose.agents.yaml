@@ -1,0 +1,38 @@
+# Overlay: let project chat run agents in the sandbox router (docs/project-chat.md).
+# The router stays a host process, because it starts containers with the host's
+# rootless Podman (or Docker with Kata). install.sh adds this overlay when
+# EMBER_AGENTS_CONFIG_FILE is set, and only together with sign-in
+# (deploy/compose.oidc.yaml): anyone who can call the chat routes can start a
+# container on this host. Without the installer:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml \
+#     -f deploy/compose.redis.yaml -f deploy/compose.agents.yaml up -d
+#
+# EMBER_AGENTS_CONFIG_FILE  absolute host path of the agents file. Its
+#                           routerSocket must be /run/ember-router/router.sock,
+#                           the path inside the API container. Readable by UID
+#                           65532; it holds no secret.
+# EMBER_ROUTER_SOCKET_DIR   absolute host path of the directory holding the
+#                           router's router.sock. Keep it persistent (not under
+#                           /run): the mount must outlive router restarts.
+# EMBER_ROUTER_GID          numeric GID passed to the router's -client-group.
+#                           The directory is mode 0710 and the socket 0660, both
+#                           owned by this group; the API joins it.
+services:
+  api:
+    environment:
+      EMBER_AGENTS_CONFIG_FILE: /etc/ember/agents.json
+    group_add:
+      - "${EMBER_ROUTER_GID:?set EMBER_ROUTER_GID to the numeric GID of the router's client group}"
+    volumes:
+      - type: bind
+        source: ${EMBER_AGENTS_CONFIG_FILE:?set EMBER_AGENTS_CONFIG_FILE to the host path of the agents file}
+        target: /etc/ember/agents.json
+        read_only: true
+      # The directory, not the socket file: the router replaces the socket each
+      # time it starts. Connecting to a socket works on a read-only mount.
+      - type: bind
+        source: ${EMBER_ROUTER_SOCKET_DIR:?set EMBER_ROUTER_SOCKET_DIR to the host directory of the router socket}
+        target: /run/ember-router
+        read_only: true
+        bind:
+          create_host_path: false

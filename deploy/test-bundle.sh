@@ -50,6 +50,25 @@ assert not services["redis"].get("ports")
 assert "@sha256:" in services["redis"]["image"]
 assert services["api"]["environment"]["EMBER_REDIS_ADDR"] == "redis:6379"
 '
+# Agents overlay: only the API joins the router's client group and sees its socket.
+EMBER_AUTH_CONFIG_FILE=/etc/ember/auth.json EMBER_OIDC_CLIENT_SECRET_FILE=/etc/ember/oidc-client-secret \
+  EMBER_REDIS_PASSWORD_FILE=/etc/ember/redis-password EMBER_AGENTS_CONFIG_FILE=/etc/ember/agents.json \
+  EMBER_ROUTER_SOCKET_DIR=/var/lib/ember-router-socket EMBER_ROUTER_GID=4242 \
+  docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml \
+    -f deploy/compose.agents.yaml config --format json |
+  python3 -c '
+import json, sys
+services = json.load(sys.stdin)["services"]
+api = services["api"]
+assert api["environment"]["EMBER_AGENTS_CONFIG_FILE"] == "/etc/ember/agents.json"
+assert api["group_add"] == ["4242"], api["group_add"]
+mounts = {v["target"]: v for v in api["volumes"]}
+assert mounts["/run/ember-router"]["source"] == "/var/lib/ember-router-socket"
+assert all(mounts[t]["read_only"] for t in ("/run/ember-router", "/etc/ember/agents.json"))
+for name in ("frontend", "web", "redis"):
+    assert "/run/ember-router" not in [v.get("target") for v in services[name].get("volumes", [])]
+    assert not services[name].get("group_add") or name == "redis"
+'
 export COMPOSE_PROJECT_NAME="$project"
 EMBER_HTTP_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 export EMBER_HTTP_PORT

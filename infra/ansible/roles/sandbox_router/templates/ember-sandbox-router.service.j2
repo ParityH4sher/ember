@@ -1,0 +1,21 @@
+# Managed by Ansible (roles/sandbox_router). See docs/project-chat.md.
+[Unit]
+Description=Ember sandbox router for project chat
+# Rootless Podman uses the user's systemd instance, which lingering starts.
+Wants=user@{{ sandbox_router_uid }}.service
+After=user@{{ sandbox_router_uid }}.service
+
+[Service]
+Type=simple
+User={{ sandbox_router_user }}
+WorkingDirectory={{ sandbox_router_home }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ sandbox_router_uid }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ sandbox_router_uid }}/bus
+# A socket left by a crash would make listening fail.
+ExecStartPre=/bin/rm -f {{ sandbox_router_socket_dir }}/router.sock
+ExecStart={{ sandbox_router_install_dir }}/bin/sandbox-router -config {{ sandbox_router_install_dir }}/policy.json -socket {{ sandbox_router_socket_dir }}/router.sock -client-group {{ sandbox_router_client_group }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

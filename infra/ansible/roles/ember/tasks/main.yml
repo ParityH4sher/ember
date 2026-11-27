@@ -127,6 +127,7 @@
     - compose.redis.yaml
     - compose.edge.yaml
     - compose.registry.yaml
+    - compose.agents.yaml
 
 - name: Prepare to pull prebuilt images
   when: ember_from_registry | bool
@@ -264,6 +265,38 @@
       register: ember_redis_secret
       no_log: true
 
+- name: Configure project chat
+  when: ember_agents_enabled | bool
+  block:
+    # roles/sandbox_router runs first in site.yml and records these facts.
+    - name: Require sign-in and the sandbox router for project chat
+      ansible.builtin.assert:
+        that:
+          - ember_oidc_enabled | bool
+          - sandbox_router_gid is defined and sandbox_router_gid | string is match('^[1-9][0-9]*$')
+          - sandbox_router_socket_dir_fact is defined
+          - sandbox_router_chat_agents is defined and sandbox_router_chat_agents | length > 0
+        fail_msg: >-
+          ember_agents_enabled needs ember_oidc_enabled and the sandbox_router
+          role earlier in the play (playbooks/site.yml).
+        quiet: true
+
+    # Read by the API (UID 65532); it holds no secret. routerSocket is the
+    # path inside the API container, where compose.agents.yaml mounts the
+    # router's socket directory.
+    - name: Write the project chat agents file
+      ansible.builtin.copy:
+        content: "{{ ember_agents_config | to_nice_json }}\n"
+        dest: "{{ ember_install_dir }}/config/agents.json"
+        owner: root
+        group: root
+        mode: "0444"
+      vars:
+        ember_agents_config:
+          routerSocket: /run/ember-router/router.sock
+          agents: "{{ sandbox_router_chat_agents | community.general.keep_keys(target=['id', 'name']) }}"
+      register: ember_agents_config_file
+
 - name: Fingerprint installed build inputs
   ansible.builtin.find:
     paths:
@@ -308,10 +341,10 @@
   environment: "{{ ember_compose_environment }}"
   register: ember_reconcile
 
-# The API reads its sign-in files only at startup, and Compose does not notice
-# changed contents of mounted files. A new Redis password needs Redis restarted
-# too, which keeps its data but makes the API reconnect.
-- name: Restart the API after a sign-in configuration change
+# The API reads its sign-in and agents files only at startup, and Compose does
+# not notice changed contents of mounted files. A new Redis password needs Redis
+# restarted too, which keeps its data but makes the API reconnect.
+- name: Restart the API after a sign-in or agents configuration change
   community.docker.docker_compose_v2:
     project_src: "{{ ember_install_dir }}/deploy"
     project_name: "{{ ember_project_name }}"
@@ -323,7 +356,7 @@
     - ember_oidc_enabled | bool
     - >-
       ember_oidc_config_file is changed or ember_oidc_secret is changed
-      or ember_redis_secret is changed
+      or ember_redis_secret is changed or ember_agents_config_file is changed
     - ember_reconcile is not changed
 
 - name: Record successfully deployed build inputs

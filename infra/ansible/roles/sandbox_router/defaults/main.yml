@@ -1,0 +1,30 @@
+---
+# The sandbox router for project chat (docs/project-chat.md). site.yml runs
+# this role only while ember_agents_enabled is true; the ember role then adds
+# deploy/compose.agents.yaml. Only the `trusted` profile is supported here:
+# agents run in rootless Podman as sandbox_router_user and share the host
+# kernel. Do not register agents that execute generated code.
+
+sandbox_router_user: ember-router
+sandbox_router_home: /var/lib/ember-router
+# Members may connect to the router socket. The API container joins it by GID.
+sandbox_router_client_group: ember-agents
+sandbox_router_install_dir: /opt/ember-router
+# Persistent, so the API container's bind mount outlives router restarts.
+sandbox_router_socket_dir: /var/lib/ember-router-socket
+
+# Subordinate UID and GID range for rootless Podman. System users get none
+# from useradd; pick a range no other user's entry in /etc/subuid overlaps.
+sandbox_router_subid_start: 1879048192
+sandbox_router_subid_count: 65536
+
+# Build and register the offline chat fixture (services/sandbox-router/chat-fixture).
+sandbox_router_fixture: true
+# More agents, as {id, name, image}: `image` is the sha256:<64 hex> ID of an
+# image already in sandbox_router_user's Podman storage (see the router README,
+# "Bring your own agent"). `id` matches ^[a-z][a-z0-9-]{0,62}$, `name` is shown
+# to users.
+sandbox_router_agents: []
+
+# Builds the router binary with no network; the same image as apps/api.
+sandbox_router_go_image: docker.io/library/golang:1.27.4@sha256:205c7636d74e0ffbe3d007162df7d74f859f5a8c8322dfb9f907977686c126cf

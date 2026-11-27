@@ -1,0 +1,11 @@
+---
+# Runs rootless Podman as the router user from Ansible's root session.
+sandbox_router_podman:
+  - runuser
+  - -u
+  - "{{ sandbox_router_user }}"
+  - --
+  - env
+  - XDG_RUNTIME_DIR=/run/user/{{ sandbox_router_uid }}
+  - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ sandbox_router_uid }}/bus
+  - podman

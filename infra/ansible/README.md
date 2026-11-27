@@ -199,3 +199,14 @@ publishing Ember through Tailscale Serve, because sign-in only works on Ember's
 public URL. Run `stacks.yml` first, then `site.yml`. Details are in the
 [Authentik stack](../stacks/authentik/README.md#connecting-ember) and the
 [sign-in guide](../../docs/authentication.md).
+
+### Project chat agents
+
+`ember_agents_enabled: true` (off by default, and only with sign-in) runs the
+`sandbox_router` role before `ember`: rootless Podman, an `ember-router`
+system user, the sandbox router as `ember-sandbox-router.service`, and the
+offline chat fixture as its first agent, all with the `trusted` profile. The
+`ember` role then writes `/opt/ember/config/agents.json` and deploys
+`deploy/compose.agents.yaml`, which lets the API container reach the router's
+socket. Signed-in users can then start these agents, each run a container on
+this host. See [project chat](../../docs/project-chat.md#turn-on-chat-in-a-deployment).

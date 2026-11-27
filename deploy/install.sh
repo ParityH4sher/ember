@@ -42,6 +42,30 @@ if [[ -n "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
   fi
   export EMBER_REDIS_PASSWORD_FILE
 fi
+# Optional project chat; see docs/project-chat.md. The sandbox router runs on
+# the host with -client-group, and only signed-in users may start its agents.
+if [[ -n "${EMBER_AGENTS_CONFIG_FILE:-}" ]]; then
+  if [[ -z "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
+    echo "EMBER_AGENTS_CONFIG_FILE needs sign-in (EMBER_AUTH_CONFIG_FILE): chat runs start containers on this host." >&2
+    exit 2
+  fi
+  if [[ "$EMBER_AGENTS_CONFIG_FILE" != /* || "${EMBER_ROUTER_SOCKET_DIR:-}" != /* ]]; then
+    echo "Set EMBER_AGENTS_CONFIG_FILE and EMBER_ROUTER_SOCKET_DIR to absolute host paths." >&2
+    exit 2
+  fi
+  if [[ ! -f "$EMBER_AGENTS_CONFIG_FILE" || ! -d "$EMBER_ROUTER_SOCKET_DIR" ]]; then
+    echo "Create the agents file and the router socket directory first (docs/project-chat.md)." >&2
+    exit 1
+  fi
+  # The API joins the group that owns the socket directory.
+  EMBER_ROUTER_GID="${EMBER_ROUTER_GID:-$(stat -c %g -- "$EMBER_ROUTER_SOCKET_DIR")}"
+  if [[ ! "$EMBER_ROUTER_GID" =~ ^[1-9][0-9]*$ ]]; then
+    echo "EMBER_ROUTER_GID must be the router client group's numeric GID, not root's." >&2
+    exit 2
+  fi
+  export EMBER_ROUTER_GID
+  compose+=(-f deploy/compose.agents.yaml)
+fi
 if [[ $# -eq 1 && $1 == --check ]]; then
   "${compose[@]}" config --quiet
   echo "Ember Compose configuration is valid."

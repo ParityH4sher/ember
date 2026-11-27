@@ -755,6 +755,39 @@ Authentik is reachable from here), the `ember-e2e` blueprint in Authentik
 image rebuild, `scripts/test-real.sh` (no Podman or Docker here), the `web`
 CI job on GitHub, and the web image's `nginx.conf` in a container.
 
+## Project chat in the Compose deployment, plan phase P8 (2026-11-23)
+
+- Sandbox router: `-client-group NAME|GID` shares the socket with one group
+  (directory `0710` owned by the group, socket `0660`); without it, the
+  operator-only `0700`/`0600` check is unchanged. The socket is created under
+  umask `0177`, and the signal handler is installed before listening.
+- `deploy/compose.agents.yaml`: the API joins `EMBER_ROUTER_GID`, mounts the
+  agents file at `/etc/ember/agents.json` and the router's socket directory
+  read-only at `/run/ember-router`. `install.sh` adds it when
+  `EMBER_AGENTS_CONFIG_FILE` is set and refuses it without sign-in; the bundle
+  includes it and `test-bundle.sh` checks its merged configuration.
+- Ansible: `ember_agents_enabled` (default `false`, requires
+  `ember_oidc_enabled`) runs the new `sandbox_router` role (Podman, an
+  `ember-router` system user with subordinate IDs and lingering, the router
+  built in the pinned Go image with `--network=none`, the chat fixture built
+  in that user's rootless storage, `policy.json`, `ember-sandbox-router.service`)
+  and makes the `ember` role write `agents.json` and deploy the overlay. Only
+  the `trusted` profile.
+
+Verification (devcontainer, Go 1.27.4, ansible-core from the repository venv):
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l`, `go vet`, `go test -race ./...` in `services/sandbox-router` | Pass, including new tests for the directory check, group lookup and the socket mode, group and shutdown of `serve` in both modes. |
+| `ansible-playbook --syntax-check playbooks/site.yml`, `ansible-lint` | Pass for the changed roles; the two `tailscale` findings predate this change. |
+| Local render of `policy.json.j2`, the unit, `agents.json` and the Compose files and environment | As expected; names with quotes are escaped. |
+| API built from `apps/api` with the rendered `agents.json`, router with `-client-group` | `GET /v1/agents` reports both agents and `enabled: true`; directory `0710`, socket `0660`, group as given. |
+
+Not run: `docker compose config` with the overlay and the bundle smoke test
+(no Docker here; CI runs `test-bundle.sh`), the `sandbox_router` role on a
+host, rootless Podman under a system service on the Pi, and a chat message
+through a deployed API container to the host router.
+
 ## 2026-11-27 — widget board and app launcher
 
 Added a widget contract and registry (`web/src/lib/widgets/`), an app
