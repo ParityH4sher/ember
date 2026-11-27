@@ -8,8 +8,8 @@
   import Unavailable from '../lib/shell/Unavailable.svelte';
   import { loadPrefs } from '../lib/prefs.svelte';
   import { listServices } from '../lib/api';
-  import { registerApp, registerApps } from '../lib/apps/registry';
-  import { adminApp, serviceApps } from '../lib/apps/static';
+  import { registerApps } from '../lib/apps/registry';
+  import { adminApps, serviceApps } from '../lib/apps/static';
   import '../lib/setup';
   import '../app.css';
 
@@ -32,7 +32,7 @@
     listServices().then(r => { if (live) undo = registerApps(serviceApps(r.services)); }, () => {});
     return () => { live = false; undo(); };
   });
-  $effect(() => { if (ready && auth.admin) return registerApp(adminApp); });
+  $effect(() => { if (ready && auth.admin) return registerApps(adminApps); });
 
   // Auth gate. The API enforces sign-in; this sends people to the sign-in page
   // instead of showing pages full of 401 errors.

@@ -5,14 +5,32 @@ sidebar_position: 6
 
 # App launcher
 
-The app launcher is a [widget](widgets.md) on the dashboard. It shows every
-registered app in a grid you can search, with category tabs, pinned apps and
-recently used apps. It reads apps from the **app registry**, which is separate
-from the widget registry. Registering an app needs no change to the launcher,
-and an app registered while the page is open appears at once.
+There is one app launcher, with three ways to open it:
 
-Code: `apps/frontends/web/src/lib/apps/` (registry, launch targets, static
-list) and `src/lib/launcher/` (the widget).
+- the **launcher circle** in the middle of the desktop surface (`/desktop/`)
+  on the primary display
+- the **launcher shortcut**, **Ctrl+K** (**⌘K** on a Mac) by default, from
+  any page: it focuses the search of a launcher widget shown on the page, and
+  otherwise opens the launcher in the centre of the screen
+- the **App launcher** [widget](widgets.md) on the dashboard, shown in place
+  or as a compact button
+
+All three show the same launcher UI (`LauncherPanel`): every registered app
+in a grid you can search, with category tabs, pinned apps and recently used
+apps. They read the same **app registry**, which is separate from the widget
+registry, and share pinned and recent apps. Registering an app needs no
+change to the launcher, and an app registered while the page is open appears
+at once.
+
+Code: `apps/frontends/web/src/lib/apps/` (registry, launch targets, built-in
+apps), `src/lib/launcher/` (the launcher UI and widget) and
+`src/lib/desktop/` (the circle, its primary-display election), wired together
+in `src/lib/shell/AppShell.svelte`.
+
+The installed app starts on the desktop surface: the web app manifest's
+`start_url` is `./desktop/`, which resolves to `/desktop/` next to the
+manifest. The dashboard (`/`) stays one launch away as the built-in
+**Dashboard** app, and the brand link in the top bar still goes there.
 
 ## Registering apps
 
@@ -40,18 +58,20 @@ Without an icon, the launcher shows the app's initial.
 | `url` | `{ type: 'url', url: 'https://…', newWindow?: boolean }` | An http(s) URL without credentials. Opens in a new tab without a referrer, or in the current tab with `newWindow: false`. |
 | `custom` | `{ type: 'custom', run: app => … }` | Any function, sync or async. If it throws, the launcher reports "Could not open …" and logs a warning. |
 
-### At startup (static list)
+### At startup (built-in pages)
 
-Built-in apps are listed in `src/lib/apps/static.ts` (`staticApps`) and
-registered by `src/lib/setup.ts` before any page renders:
+Ember's own pages are listed once, in `src/lib/shell/nav.ts`. The sidebar
+renders that list, and `src/lib/apps/static.ts` turns each entry into an app
+(section → category, `href` → an `internal` launch). `src/lib/setup.ts`
+registers them before any page renders. To add a page, add one entry:
 
 ```ts
-export const staticApps: readonly AppDefinition[] = [
-  { id: 'ember.notes', name: 'Project notes', icon: icon('notes'), category: 'Workspace',
-    keywords: ['markdown', 'wiki'], launch: { type: 'internal', path: '/apps/notes/' } },
-  // …
-];
+{ id: 'ember.notes', href: '/apps/notes/', label: 'Project notes', icon: 'notes',
+  description: 'Linked Markdown notes and project chat.', keywords: ['markdown', 'wiki'] },
 ```
+
+The `id` is stored in pinned and recent lists, so keep it stable. Entries with
+`admin: true` are registered at runtime, for admins only.
 
 ### At runtime
 
@@ -72,7 +92,7 @@ The root layout uses this to register apps that depend on the session or the
 API:
 
 - one app per shared service from `GET /v1/services`, under **Services**
-- **Admin**, for admins only (the API still enforces the role)
+- the `admin: true` pages from `nav.ts` (**Admin**), for admins only (the API still enforces the role)
 
 A script that is not bundled with the app can use the same registry through
 `window.ember.apps.register(app)`, `.unregister(id)` and `.list()`.
@@ -99,7 +119,8 @@ unless it is registered with `{ replace: true }`. Registration never throws.
   matches. Screen readers hear the number of results.
 - **Enter** in the search box opens the top result.
 - **Categories:** when any app has a category, tabs show *All* plus each
-  category. The selected tab is saved with the widget.
+  category. A widget saves its selected tab; the circle's launcher keeps it
+  until the page reloads.
 - **Pinned** apps show first, in the order they were pinned. **Recent** lists
   the last apps opened from the launcher, newest first.
 - **App menu:** right-click, long-press on touch screens, or press
@@ -112,7 +133,7 @@ unless it is registered with `{ replace: true }`. Registration never throws.
 
 | Key | Where | Action |
 | --- | --- | --- |
-| **Alt+Shift+L** (configurable) | Anywhere on the page | Focus the launcher's search; in compact mode, open it first. |
+| **Ctrl+K** / **⌘K** (configurable) | Any page | With a launcher widget shown in place (grid mode) on the page, focus its search. Otherwise open the launcher (in the centre, or from the circle on the desktop) with the search focused; press again to close. |
 | Type | Search box | Filter. |
 | **Enter** | Search box | Open the top result. |
 | **↓** | Search box | Move to the first app. |
@@ -120,17 +141,46 @@ unless it is registered with `{ replace: true }`. Registration never throws.
 | **Home** / **End** | App grid | First or last app of the section. |
 | **Enter** / **Space** | App | Open it. |
 | **Shift+F10** / **Menu** | App | Open the app menu (**↑ ↓**, **Home**, **End**, **Escape**). |
-| **Escape** | Search or grid | Clear the search; with an empty search, close the compact popover. |
+| **Escape** | Search or grid | Clear the search; with an empty search, close the launcher (circle or compact popover). An open app menu or App info closes first. |
 | **← →**, **Home**, **End** | Category tabs | Change tab. |
 
 Only one app is a tab stop at a time (roving tabindex), so **Tab** leaves the
-grid in one step. The shortcut matches physical keys, so it works with any
-keyboard layout and with Option on macOS. Alt+Shift+L was chosen because no
-common browser binds it by default and desktops rarely do. On macOS it
-replaces typing "Ò" while the page has focus. If it clashes with your system
-or an input method, change it. A shortcut must include Ctrl, Alt or
-Meta (or be F1–F12), so it cannot take over plain typing. With several
-launchers on one page, the first one claims the shortcut.
+grid in one step.
+
+### The launcher shortcut
+
+There is one shortcut for the whole app, set in **Settings › Desktop ›
+Launcher shortcut** and stored with the other display preferences. The
+default is `Mod+K`: **Ctrl+K**, or **⌘K** on Apple keyboards (`Mod` accepts
+either key). It was chosen over Alt+Shift+L because:
+
+- Ctrl/⌘+K is the usual command-palette shortcut (GitHub, Slack, Linear and
+  many editors), so people try it first.
+- In the installed app's own window no browser shortcut competes. In a
+  browser tab the page takes it first; the browser's own Ctrl+K (search the
+  web) stays available from the address bar.
+- Alt+Shift alone switches the input language on Windows for many people, and
+  Alt+Shift+L types "Ò" on macOS.
+
+Write a shortcut as modifiers and a key, e.g. `Mod+K`, `Ctrl+Alt+Space` or
+`Alt+Shift+L`. It matches physical keys, so it works with any keyboard layout.
+A shortcut must include Mod, Ctrl, Alt or Meta (or be F1–F12), so it cannot
+take over plain typing. Leave the field empty to turn the shortcut off; the
+circle and the widget still work.
+
+What the shortcut does depends on the page:
+
+- **A launcher widget is shown in place** (grid mode) and visible: the
+  shortcut scrolls it into view if needed and focuses its search. Nothing
+  opens on top of the launcher that is already there. With several, the
+  first one placed wins. A widget hidden with CSS, or on a board that is not
+  shown, does not count.
+- **Otherwise** (no widget, or only compact ones): the shortcut opens the
+  centred launcher, from the circle on the desktop surface, and pressing it
+  again closes it.
+
+Grid-mode widgets register themselves in `src/lib/launcher/inline.ts`;
+`LauncherCircle` asks them first (its `intercept` prop) before it opens.
 
 ## Configuration
 
@@ -139,13 +189,14 @@ Open **Configure App launcher** on its title bar:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | Display | Grid | *Grid* shows the launcher in place. *Compact* shows one button that opens it as a popover, for a narrow, taskbar-like slot. |
-| Keyboard shortcut | `Alt+Shift+L` | For example `Ctrl+Alt+Space` or `Meta+K`. Leave it empty to turn it off. |
 | Show recently used apps | On | Shows or hides the Recent section. |
 | Recent apps to show | 6 | From 1 to 12. |
 | Width and height | 2 × 3 | In board cells, from 1 × 1 to 4 × 8. |
 
 Each placement keeps its own configuration. Placing two launchers, one grid
-and one compact, works.
+and one compact, works. The keyboard shortcut is not a widget setting (see
+above); a grid-mode widget lists it on its search box
+(`aria-keyshortcuts`).
 
 ## Persistence and sync
 
@@ -163,9 +214,12 @@ registered. Entries for apps not seen for 30 days are removed.
 
 ## Multi-display
 
-Ember has no multi-display coordination yet (no window-per-screen,
-no `BroadcastChannel` protocol). The widget context has an optional
-`displays` coordinator for it:
+Ember detects the primary display and makes sure exactly one window shows
+the launcher circle: `src/lib/desktop/primary-display.ts` (Window Management
+API, when permission was already granted) and `election.ts` (windows announce
+themselves on the `ember:multi-display` BroadcastChannel and elect one). It
+does not yet send launches between windows. The widget context has an
+optional `displays` coordinator for that, which nothing provides yet:
 
 ```ts
 interface DisplayCoordinator {
@@ -174,8 +228,10 @@ interface DisplayCoordinator {
 }
 ```
 
-When a future feature passes one to `WidgetBoard` (`displays` prop), the app
-menu shows **Open on *display*** for every other display. Boards already store
+When the multi-display work passes one to `WidgetBoard` (`displays` prop), and
+to the circle's launcher in `AppShell`, the app menu shows **Open on
+*display*** for every other display. It should build on the channel and
+election above rather than add a second mechanism. Boards already store
 layouts per display (`displayId` prop), so each screen can have its own
 launcher configuration.
 
@@ -184,9 +240,21 @@ launcher configuration.
 - `tests/unit/registry.spec.ts`: register, unregister, duplicates,
   replacement, validation, and each launch type.
 - `tests/unit/launcher.spec.ts`: search and ranking, pinned and recent
-  ordering, stale entries, grid navigation, and shortcut parsing.
-- `tests/ui/launcher.spec.ts`: the widget in the built app. It covers search
-  and Enter, keyboard navigation, the shortcut, the context menu by mouse,
-  keyboard and touch, App info, pinning synced across two windows, recents,
-  runtime and invalid apps, and 250 apps. It also configures, removes and
-  re-adds the widget and runs axe checks in both themes.
+  ordering, stale entries, grid navigation, shortcut parsing (including
+  `Mod`), and which in-place launcher takes the shortcut.
+- `tests/ui/launcher-widget.spec.ts`: the widget in the built app. It covers
+  search and Enter, keyboard navigation, the context menu by mouse, keyboard
+  and touch, App info, pinning synced across two windows, recents, runtime
+  and invalid apps, and 250 apps. It also covers the shortcut focusing the
+  widget's search on the dashboard (and opening the centred launcher when the
+  widget is compact), the shortcut opening the same launcher with the same
+  pins on other pages, setting the shortcut in
+  Settings, configuring, removing and re-adding the widget, and axe checks in
+  both themes.
+- `tests/ui/launcher-circle.spec.ts`: the circle on `/desktop/`: centring,
+  the primary-display election across windows, the shortcut, Escape order
+  (search, app menu, App info, then the launcher), menu placement inside the
+  centred panel, and axe checks with the launcher open.
+- `src/lib/desktop/election.test.ts` (`npm test`): the election rules.
+- `tests/ui/pages.spec.ts`: the manifest's `start_url` resolves to the
+  desktop surface, and the Dashboard opens from the launcher there.

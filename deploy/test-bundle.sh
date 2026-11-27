@@ -71,8 +71,10 @@ health
 base="http://127.0.0.1:$EMBER_HTTP_PORT"
 # One web app serves every page, the manifest and the service workers. Pages
 # behind sign-in render in the browser, so only /login/ has a prerendered title.
+# The installed app starts on the desktop surface (the manifest's start_url).
 curl --noproxy '*' -fsS --retry 10 --retry-all-errors --retry-delay 1 "$base/" | grep -qF '__sveltekit_'
 curl --noproxy '*' -fsS "$base/apps/notes/" | grep -qF '__sveltekit_'
+curl --noproxy '*' -fsS "$base/desktop/" | grep -qF '__sveltekit_'
 curl --noproxy '*' -fsS "$base/login/" | grep -qF '<title>Sign in · Ember</title>'
 test "$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$base/apps/notes?project=p")" \
   = "308 $base/apps/notes/?project=p"
@@ -80,7 +82,7 @@ test "$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$
   = "308 $base/login/?returnTo=%2F"
 test "$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' "$base/no-such-page")" = 404
 curl --noproxy '*' -fsS "$base/manifest.webmanifest" |
-  python3 -c 'import json, sys; m = json.load(sys.stdin); assert m["display"] == "standalone" and m["start_url"] == "./"'
+  python3 -c 'import json, sys; m = json.load(sys.stdin); assert m["display"] == "standalone" and m["start_url"] == "./desktop/"'
 curl --noproxy '*' -fsS "$base/service-worker.js" > /dev/null
 curl --noproxy '*' -fsS "$base/apps/notes/service-worker.js" | grep -oF 'registration.unregister()'
 # A service name survives replacement; a cached container IP may not.

@@ -1,3 +1,4 @@
+import { appRegistry } from './registry';
 import type { AppDefinition } from './types';
 
 /** How the host page opens things. The page supplies these, so that apps and
@@ -30,6 +31,13 @@ export async function launchApp(app: AppDefinition, openers: Openers, warn = (m:
     warn(`[ember] Could not launch app "${app.id}": ${error instanceof Error ? error.message : error}`);
     return false;
   }
+}
+
+/** Launches a registered app by id; false, with a warning, if there is none or it failed. */
+export async function launchById(appId: string, openers: Openers, apps = appRegistry): Promise<boolean> {
+  const app = apps.get(appId);
+  if (!app) { console.warn(`[ember] No app "${appId}" is registered.`); return false; }
+  return launchApp(app, openers);
 }
 
 /** A short, readable description of where an app opens. */

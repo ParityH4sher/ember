@@ -19,7 +19,7 @@
     context: WidgetContext;
     /** The shortcut in aria-keyshortcuts form, if one is set. */
     shortcut?: string;
-    /** Set in compact mode: Escape on an empty search closes the popover. */
+    /** Set when the launcher is in a popover or dialog: Escape on an empty search closes it. */
     onclose?: () => void;
     onlaunch?: () => void;
   } = $props();
@@ -269,7 +269,9 @@
     </div>
   {/if}
 
-  <dialog bind:this={infoDialog} aria-labelledby="{uid}-info-title" onclose={() => (info = null)}>
+  <!-- Escape closes only this dialog, not a popover or panel around the launcher. -->
+  <dialog bind:this={infoDialog} aria-labelledby="{uid}-info-title" onclose={() => (info = null)}
+    onkeydown={e => { if (e.key === 'Escape') e.stopPropagation(); }}>
     {#if info}
       <div class="info-head">
         <AppIcon icon={info.icon} name={info.name} size={40} />

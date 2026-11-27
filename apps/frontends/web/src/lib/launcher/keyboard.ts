@@ -45,26 +45,30 @@ export function moveFocus(key: string, pos: GridPos, sizes: readonly number[], c
   }
 }
 
-export interface Shortcut { code: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
+/** `mod` is Ctrl, or ⌘ (Meta) on Apple keyboards: either key matches. */
+export interface Shortcut { code: string; mod: boolean; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
 
-export const DEFAULT_SHORTCUT = 'Alt+Shift+L';
+/** Ctrl+K, or ⌘K on Apple keyboards: the usual command-palette shortcut. */
+export const DEFAULT_SHORTCUT = 'Mod+K';
 
 const named: Record<string, string> = {
   space: 'Space', enter: 'Enter', '/': 'Slash', '.': 'Period', ',': 'Comma', ';': 'Semicolon',
   "'": 'Quote', '[': 'BracketLeft', ']': 'BracketRight', '-': 'Minus', '=': 'Equal', '`': 'Backquote'
 };
 
-/** Parses e.g. "Alt+Shift+L" or "Ctrl+Alt+Space". Matching uses physical key
-    codes, so it works with any keyboard layout and with Option on macOS. A
-    shortcut needs Ctrl, Alt or Meta, except F1–F12, so it never takes
-    over plain typing. Returns null for anything else. */
+/** Parses e.g. "Mod+K", "Alt+Shift+L" or "Ctrl+Alt+Space". "Mod" means
+    Ctrl, or ⌘ on Apple keyboards. Matching uses physical key codes, so it
+    works with any keyboard layout and with Option on macOS. A shortcut needs
+    Mod, Ctrl, Alt or Meta, except F1–F12, so it never takes over plain
+    typing. Returns null for anything else. */
 export function parseShortcut(text: string): Shortcut | null {
   const parts = text.split('+').map(p => p.trim()).filter(Boolean);
   if (!parts.length || parts.length > 5) return null;
-  const s: Shortcut = { code: '', ctrl: false, alt: false, shift: false, meta: false };
+  const s: Shortcut = { code: '', mod: false, ctrl: false, alt: false, shift: false, meta: false };
   for (const part of parts.slice(0, -1)) {
     const m = part.toLowerCase();
-    if (m === 'ctrl' || m === 'control') s.ctrl = true;
+    if (m === 'mod') s.mod = true;
+    else if (m === 'ctrl' || m === 'control') s.ctrl = true;
     else if (m === 'alt' || m === 'option') s.alt = true;
     else if (m === 'shift') s.shift = true;
     else if (m === 'meta' || m === 'cmd' || m === 'command' || m === 'super') s.meta = true;
@@ -77,14 +81,37 @@ export function parseShortcut(text: string): Shortcut | null {
   else if (named[key.toLowerCase()]) s.code = named[key.toLowerCase()];
   else if (/^(Key[A-Z]|Digit[0-9])$/.test(key)) s.code = key;
   else return null;
-  if (!s.ctrl && !s.alt && !s.meta && !/^F\d+$/.test(s.code)) return null;
+  if (s.mod && (s.ctrl || s.meta)) return null;
+  if (!s.mod && !s.ctrl && !s.alt && !s.meta && !/^F\d+$/.test(s.code)) return null;
   return s;
 }
 
+const keyName = (s: Shortcut) => s.code.replace(/^Key|^Digit/, '');
+
+/** The stored form, e.g. "Mod+K" or "Ctrl+Alt+Space". */
 export function formatShortcut(s: Shortcut): string {
-  const key = s.code.replace(/^Key|^Digit/, '');
-  return [s.ctrl && 'Ctrl', s.alt && 'Alt', s.shift && 'Shift', s.meta && 'Meta', key].filter(Boolean).join('+');
+  return [s.mod && 'Mod', s.ctrl && 'Ctrl', s.alt && 'Alt', s.shift && 'Shift', s.meta && 'Meta', keyName(s)].filter(Boolean).join('+');
 }
 
-export const matchesShortcut = (e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>, s: Shortcut) =>
-  e.code === s.code && e.ctrlKey === s.ctrl && e.altKey === s.alt && e.shiftKey === s.shift && e.metaKey === s.meta;
+/** Apple keyboards: macOS, iOS and iPadOS. */
+export const isApple = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+/** What to show people, e.g. "Ctrl+K", or "⌘K" on Apple keyboards. */
+export function displayShortcut(s: Shortcut, apple = isApple()): string {
+  if (apple) return [s.ctrl && '⌃', s.alt && '⌥', s.shift && '⇧', (s.mod || s.meta) && '⌘', keyName(s)].filter(Boolean).join('');
+  return [(s.mod || s.ctrl) && 'Ctrl', s.alt && 'Alt', s.shift && 'Shift', s.meta && 'Meta', keyName(s)].filter(Boolean).join('+');
+}
+
+/** The value for aria-keyshortcuts; "Mod" lists both the Ctrl and the ⌘ form. */
+export function ariaShortcut(s: Shortcut): string {
+  const one = (ctrl: boolean, meta: boolean) =>
+    [ctrl && 'Control', s.alt && 'Alt', s.shift && 'Shift', meta && 'Meta', keyName(s)].filter(Boolean).join('+');
+  return s.mod ? `${one(true, false)} ${one(false, true)}` : one(s.ctrl, s.meta);
+}
+
+export function matchesShortcut(e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>, s: Shortcut): boolean {
+  if (e.code !== s.code || e.altKey !== s.alt || e.shiftKey !== s.shift) return false;
+  // Mod: exactly one of Ctrl and ⌘, whichever the keyboard uses.
+  if (s.mod) return e.ctrlKey !== e.metaKey;
+  return e.ctrlKey === s.ctrl && e.metaKey === s.meta;
+}

@@ -1,35 +1,26 @@
-import Icon, { type IconName } from '../ui/Icon.svelte';
+import Icon from '../ui/Icon.svelte';
 import type { ServiceLink } from '../api';
+import { sections, type NavItem } from '../shell/nav';
 import { httpUrl } from './registry';
 import type { AppDefinition } from './types';
 
-// Apps registered at startup (the root layout calls registerApps(staticApps)).
-// Add an entry here for a new built-in page; plugins register theirs at
-// runtime with registerApp(). See docs/app-launcher.md.
+// Built-in apps: Ember's own pages, derived from the sidebar's list
+// (shell/nav.ts) so there is one list to maintain. setup.ts registers them
+// at startup; plugins register theirs at runtime with registerApp(). See
+// docs/app-launcher.md.
 
-const icon = (name: IconName) => ({ component: Icon, props: { name } });
+const fromNav = (item: NavItem, category: string): AppDefinition => ({
+  id: item.id, name: item.label, icon: { component: Icon, props: { name: item.icon } }, category,
+  description: item.description, keywords: item.keywords, launch: { type: 'internal', path: item.href }
+});
 
-export const staticApps: readonly AppDefinition[] = [
-  { id: 'ember.notes', name: 'Project notes', icon: icon('notes'), category: 'Workspace',
-    description: 'Linked Markdown notes and project chat.', keywords: ['markdown', 'wiki', 'chat', 'projects'],
-    launch: { type: 'internal', path: '/apps/notes/' } },
-  { id: 'ember.plugins', name: 'Plugins', icon: icon('plugin'), category: 'Workspace',
-    description: 'Run plugin operations and see their status.', keywords: ['integrations', 'extensions'],
-    launch: { type: 'internal', path: '/plugins/' } },
-  { id: 'ember.account', name: 'Profile & account', icon: icon('user'), category: 'You',
-    description: 'Your identity and session.', keywords: ['profile', 'session', 'sign out'],
-    launch: { type: 'internal', path: '/account/' } },
-  { id: 'ember.settings', name: 'Settings', icon: icon('settings'), category: 'You',
-    description: 'Theme and density for this browser.', keywords: ['preferences', 'theme', 'dark', 'light'],
-    launch: { type: 'internal', path: '/settings/' } }
-];
+const all = sections.flatMap(s => s.items.map(item => ({ item, app: fromNav(item, s.label) })));
 
-/** Registered at runtime for admins only; the API enforces the role. */
-export const adminApp: AppDefinition = {
-  id: 'ember.admin', name: 'Admin', icon: icon('shield'), category: 'Instance',
-  description: 'Plugins, agents and access for this instance.', keywords: ['instance', 'operator'],
-  launch: { type: 'internal', path: '/admin/' }
-};
+/** Pages everyone may open. */
+export const staticApps: readonly AppDefinition[] = all.filter(a => !a.item.admin).map(a => a.app);
+
+/** Admin-only pages; the root layout registers them at runtime for admins (the API enforces the role). */
+export const adminApps: readonly AppDefinition[] = all.filter(a => a.item.admin).map(a => a.app);
 
 /** Shared services the operator configured (GET /v1/services), as launchable apps. */
 export function serviceApps(services: readonly ServiceLink[]): AppDefinition[] {
@@ -39,7 +30,8 @@ export function serviceApps(services: readonly ServiceLink[]): AppDefinition[] {
     let id = base;
     for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
     used.add(id);
-    return { id, name: s.name, icon: icon('external'), category: 'Services', description: `Opens ${new URL(s.url).host} in a new tab.`,
-      keywords: ['service', new URL(s.url).host], launch: { type: 'url', url: s.url } };
+    return { id, name: s.name, icon: { component: Icon, props: { name: 'external' } }, category: 'Services',
+      description: `Opens ${new URL(s.url).host} in a new tab.`, keywords: ['service', new URL(s.url).host],
+      launch: { type: 'url', url: s.url } };
   });
 }

@@ -3,7 +3,7 @@
   "name": "Ember",
   "short_name": "Ember",
   "description": "Your self-hosted Ember workspace: dashboard, linked Markdown project notes, plugins and shared services.",
-  "start_url": "./",
+  "start_url": "./desktop/",
   "scope": "./",
   "display": "standalone",
   "background_color": "#10151b",

@@ -25,7 +25,7 @@ async function open(page: Page) {
 
 test('shows built-in and runtime apps by category', async ({ page }) => {
   await open(page);
-  await expect(list(page, 'All apps').getByRole('button')).toHaveText(['Authentik', 'Plugins', 'Profile & account', 'Project notes', 'Settings']);
+  await expect(list(page, 'All apps').getByRole('button')).toHaveText(['Authentik', 'Dashboard', 'Desktop', 'Plugins', 'Profile & account', 'Project notes', 'Settings']);
   await expect(launcher(page).getByRole('tab')).toHaveText(['All', 'Services', 'Workspace', 'You']);
   await expect(launcher(page).getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
   await launcher(page).getByRole('tab', { name: 'You' }).click();
@@ -75,7 +75,7 @@ test('arrow keys move through the grid and Enter launches', async ({ page }) => 
   await page.keyboard.press('ArrowDown');
   await expect(appButton(page, 'All apps', 'Authentik')).toBeFocused();
   await page.keyboard.press('ArrowRight');
-  await expect(appButton(page, 'All apps', 'Plugins')).toBeFocused();
+  await expect(appButton(page, 'All apps', 'Dashboard')).toBeFocused();
   await page.keyboard.press('End');
   await expect(appButton(page, 'All apps', 'Settings')).toBeFocused();
   await page.keyboard.press('Home');
@@ -85,19 +85,111 @@ test('arrow keys move through the grid and Enter launches', async ({ page }) => 
   await page.keyboard.press('ArrowUp');
   await expect(search(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
   await expect(appButton(page, 'All apps', 'Project notes')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL('/apps/notes/');
 });
 
-test('the shortcut focuses the launcher from anywhere on the page', async ({ page }) => {
+test('with a launcher shown in place, the shortcut focuses its search instead of opening the overlay', async ({ page }) => {
   await open(page);
+  const shell = page.getByRole('dialog', { name: 'App launcher' });
+  await expect(search(page)).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K');
+  for (const key of ['Control+KeyK', 'Meta+KeyK']) {
+    await page.getByRole('heading', { name: 'Dashboard' }).click();
+    await expect(search(page)).not.toBeFocused();
+    await page.keyboard.press(key);
+    await expect(search(page)).toBeFocused();
+    await expect(shell).toHaveCount(0);
+  }
+  // In compact mode the widget is a button, not shown in place: the shortcut opens the overlay.
+  await page.getByRole('button', { name: 'Configure App launcher' }).click();
+  await page.getByRole('radio', { name: /Compact/ }).check();
+  await page.getByRole('button', { name: 'Done' }).click();
   await page.getByRole('heading', { name: 'Dashboard' }).click();
+  await page.keyboard.press('Control+KeyK');
+  await expect(shell.getByRole('searchbox', { name: 'Search apps' })).toBeFocused();
+  // Pressed again, the shortcut closes it.
+  await page.keyboard.press('Control+KeyK');
+  await expect(shell).toHaveCount(0);
+});
+
+test('on pages without a launcher widget the shortcut opens the same launcher, with the same apps and pins', async ({ page }) => {
+  await open(page);
+  // Pin in the widget...
+  await appButton(page, 'All apps', 'Settings').click({ button: 'right' });
+  await launcher(page).getByRole('menuitem', { name: 'Pin to top' }).click();
+  // ...and the shell's launcher (Ctrl+K by default) shows it: one registry, one state.
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+KeyK');
+  const shell = page.getByRole('dialog', { name: 'App launcher' });
+  const shellSearch = shell.getByRole('searchbox', { name: 'Search apps' });
+  await expect(shellSearch).toBeFocused();
+  await expect(shellSearch).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K');
+  await expect(shell.getByRole('list', { name: 'Pinned' }).getByRole('button')).toHaveText(['Settings']);
+  await expect(shell.getByRole('list', { name: 'All apps' }).getByRole('button', { name: 'Authentik', exact: true })).toBeVisible();
+  // Escape with a query clears it; with an empty search it closes the launcher.
+  await shellSearch.fill('zzz');
+  await page.keyboard.press('Escape');
+  await expect(shellSearch).toHaveValue('');
+  await expect(shell).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(shell).toHaveCount(0);
+  // ⌘K works too, and Enter opens the top result.
+  await page.keyboard.press('Meta+KeyK');
+  await shellSearch.fill('profile');
+  await shellSearch.press('Enter');
+  await expect(page).toHaveURL('/account/');
+  await expect(shell).toHaveCount(0);
+});
+
+test('the launcher shortcut is set once, in Settings', async ({ page }) => {
+  await page.goto('/settings/');
+  const field = page.getByRole('textbox', { name: 'Launcher shortcut' });
+  await expect(field).toHaveValue('Mod+K');
+  await expect(page.locator('#launcher-shortcut-hint kbd')).toHaveText('Ctrl+K');
+  await field.fill('shift+k');
+  await field.press('Tab');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await field.fill('ctrl+alt+k');
+  await field.press('Tab');
+  await expect(field).toHaveValue('Ctrl+Alt+K');
+  await expect(page.getByText('Saved in this browser.')).toBeVisible();
+
+  // The new shortcut focuses the launcher widget on the dashboard...
+  await page.goto('/');
+  await expect(search(page)).toBeVisible();
+  const shell = page.getByRole('dialog', { name: 'App launcher' });
+  await page.keyboard.press('Control+KeyK');
   await expect(search(page)).not.toBeFocused();
-  await expect(search(page)).toHaveAttribute('aria-keyshortcuts', 'Alt+Shift+L');
-  await page.keyboard.press('Alt+Shift+KeyL');
+  await expect(shell).toHaveCount(0);
+  await page.keyboard.press('Control+Alt+KeyK');
   await expect(search(page)).toBeFocused();
+  await expect(search(page)).toHaveAttribute('aria-keyshortcuts', 'Control+Alt+K');
+  await expect(shell).toHaveCount(0);
+  // ...and opens the centred launcher elsewhere.
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+KeyK');
+  await expect(shell).toHaveCount(0);
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(shell).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Empty turns it off.
+  await page.goto('/settings/');
+  await field.fill('');
+  await field.press('Tab');
+  await page.goto('/');
+  await expect(search(page)).toBeVisible();
+  await expect(search(page)).not.toHaveAttribute('aria-keyshortcuts');
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(search(page)).not.toBeFocused();
+  await page.goto('/plugins/');
+  await expect(page.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+Alt+KeyK');
+  await expect(shell).toHaveCount(0);
 });
 
 test('pinning from the context menu puts apps first, persists and syncs to other windows', async ({ page, api }) => {
@@ -216,7 +308,7 @@ test('stays responsive with 250 registered apps', async ({ page }) => {
       window.ember!.apps.register({ id: `bulk.${i}`, name: `Bulk app ${i}`, category: `Group ${i % 8}`, keywords: [`tag${i % 25}`],
         launch: { type: 'internal', path: '/' } });
   });
-  await expect(list(page, 'All apps').getByRole('button')).toHaveCount(255);
+  await expect(list(page, 'All apps').getByRole('button')).toHaveCount(257);
   const started = Date.now();
   for (const q of ['b', 'bu', 'bulk', 'bulk app 1', 'bulk app 12']) await search(page).fill(q);
   // The exact name first, then names with a word starting "12", then substring and keyword (tag12) matches.
@@ -241,21 +333,17 @@ test('pinned apps that are not registered are hidden', async ({ page }) => {
 
 test('the launcher is configured, removed and added back like any widget', async ({ page }) => {
   await open(page);
-  // Compact mode and a different shortcut.
+  // Compact mode. The shortcut is no longer a widget setting.
   await page.getByRole('button', { name: 'Configure App launcher' }).click();
+  await expect(page.getByRole('textbox', { name: 'Keyboard shortcut' })).toHaveCount(0);
   await page.getByRole('radio', { name: /Compact/ }).check();
-  await page.getByRole('textbox', { name: 'Keyboard shortcut' }).fill('ctrl+alt+k');
-  await page.getByRole('textbox', { name: 'Keyboard shortcut' }).press('Tab');
-  await expect(page.getByRole('textbox', { name: 'Keyboard shortcut' })).toHaveValue('Ctrl+Alt+K');
   await page.getByRole('button', { name: 'Done' }).click();
 
   const toggle = launcher(page).getByRole('button', { name: 'App launcher', exact: true });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(search(page)).toHaveCount(0);
-  await page.keyboard.press('Alt+Shift+KeyL');
-  await expect(search(page)).toHaveCount(0);
-  await page.keyboard.press('Control+Alt+KeyK');
-  await expect(page.getByRole('dialog', { name: 'App launcher' })).toBeVisible();
+  await toggle.click();
+  await expect(launcher(page).getByRole('dialog', { name: 'App launcher' })).toBeVisible();
   await expect(search(page)).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'App launcher' })).toHaveCount(0);

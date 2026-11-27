@@ -780,3 +780,63 @@ Run in `mcr.microsoft.com/devcontainers/javascript-node:24-bookworm` (Node
 Not run: the `web` CI job on GitHub, the real-infrastructure suite, Safari
 and Firefox (Chromium only), and a screen reader (labels, roles and live
 regions are checked by tests and axe only).
+
+## 2026-11-27 — one launcher: circle, shortcut and widget reconciled
+
+The launcher circle (3865dcf) and the launcher widget were merged side by
+side (368a935) with two launcher UIs, two app lists and two shortcuts. Now:
+
+- The circle's dialog renders the widget's `LauncherPanel`; both read the
+  app registry and share pinned and recent apps.
+- `shell/nav.ts` is the one list of Ember's pages: the sidebar renders it and
+  `apps/static.ts` derives the built-in apps from it (Dashboard and Desktop
+  are now apps too).
+- One shortcut, configurable in Settings › Desktop (`prefs.launcherShortcut`),
+  default `Mod+K` (Ctrl+K, ⌘K on Apple). The hard-coded Ctrl+K check and the
+  per-widget Alt+Shift+L setting are gone; stored widget `shortcut` values
+  are ignored.
+- The manifest's `start_url` is `/` (the dashboard).
+- CI also runs `npm test` (the circle's election tests).
+
+Same environment as the entry above:
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | 0 errors, 0 warnings. |
+| `npm test` | 6 passed. |
+| `npm run test:unit` | 38 passed. |
+| `npm run test:ui --repeat-each 3` | 231 passed (77 tests). The first run failed 30 tests: `resolvedTheme()` wrote state inside `$derived`, so the shell did not render; fixed. |
+| `npm --prefix website run build` with `DOCS_BASE_URL=/ember/` | Built; no broken links. |
+| Screenshots of the open circle launcher (dark, light) | Reviewed. |
+
+Not run: the `web` CI job on GitHub, Firefox and Safari, a screen reader,
+and two physical displays (the election is covered by mocked tests only).
+
+## 2026-11-27 — installed app starts on the desktop; shortcut focuses an in-place launcher
+
+Follow-up to the entry above, before landing it:
+
+- The manifest's `start_url` is now `./desktop/` (resolves to `/desktop/`),
+  so the installed app opens on the desktop surface with the launcher circle.
+  The dashboard stays reachable as the built-in **Dashboard** app.
+- Ported from the closed `unify-launchers` branch (9075eda), only its
+  shortcut rule: when a launcher widget is shown in place (grid mode) and
+  visible, the launcher shortcut focuses that widget's search instead of
+  opening the centred launcher. Grid widgets register in
+  `src/lib/launcher/inline.ts`; `LauncherCircle` asks them through its new
+  `intercept` prop. Its second page list and overlay/host files were not
+  brought over. `primary-display.ts` and `election.ts` are unchanged.
+- `deploy/test-bundle.sh` (the CI `bundle` job) asserted `start_url == "./"`,
+  so it failed on 19dfa11 (`/`). It now expects `./desktop/` and also checks
+  that `/desktop/` is served.
+
+| Check | Node 22.23.5 (host) | Node 24.22.3 (`javascript-node:24-bookworm`, `CI=1`, clean `npm ci`) |
+| --- | --- | --- |
+| `npm run check` | 0 errors, 0 warnings. | 0 errors, 0 warnings. |
+| `npm test` | 6 passed. | 6 passed. |
+| `npm run test:unit` | 39 passed. | 39 passed. |
+| `npm run test:ui` | 79 passed. | 79 passed. |
+| `npm --prefix website run build` with `DOCS_BASE_URL=/ember/` | Built. | Not run. |
+
+Not run: Firefox and Safari, a screen reader, and an installed PWA launch
+(the `start_url` is covered by a test that resolves it and opens the page).

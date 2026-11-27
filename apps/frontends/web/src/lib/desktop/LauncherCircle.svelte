@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from 'svelte';
   import { trackPrimaryDisplay, type PrimaryDisplayTracker } from './primary-display';
-  import { isLauncherShortcut } from '../shell/nav';
+  import { ariaShortcut, matchesShortcut, type Shortcut } from '../launcher/keyboard';
 
   interface Props {
     /** Launcher contents, rendered in the panel. */
@@ -16,12 +16,15 @@
     size?: string;
     /** Accessible name of the circle button. */
     label?: string;
-    /** Listen for the global launcher shortcut (Ctrl+K / ⌘K). */
-    shortcut?: boolean;
+    /** The app-wide launcher shortcut (Settings › Desktop), or null when it is off. */
+    shortcut?: Shortcut | null;
+    /** Called on the shortcut before opening; returns true when something
+        else took it (a launcher widget shown in place on the page). */
+    intercept?: () => boolean;
     open?: boolean;
   }
   let {
-    children, enabled = true, size, label = 'Open app launcher', shortcut = true, open = $bindable(false)
+    children, enabled = true, size, label = 'Open app launcher', shortcut = null, intercept, open = $bindable(false)
   }: Props = $props();
 
   const panelId = 'app-launcher';
@@ -44,7 +47,9 @@
     opener = active instanceof HTMLElement && active !== document.body ? active : null;
     open = true;
     await tick();
-    const first = panel?.querySelector<HTMLElement>('a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    // The launcher's search box, or else the first control.
+    const first = panel?.querySelector<HTMLElement>('input[type="search"]')
+      ?? panel?.querySelector<HTMLElement>('a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex="-1"])');
     (first ?? panel)?.focus();
   }
   /** Closes the launcher; `refocus` returns focus to the circle (or the opener). */
@@ -54,6 +59,8 @@
     if (refocus) (button ?? opener)?.focus();
     opener = null;
   }
+  /** Closes the launcher and returns focus to the circle (or whatever opened it). */
+  export function close() { hide(true); }
   /** Focuses the circle (when shown) and opens the launcher. */
   export function activate() {
     button?.focus();
@@ -61,10 +68,13 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (open && e.key === 'Escape') { e.preventDefault(); hide(true); return; }
-    if (shortcut && isLauncherShortcut(e)) {
+    // The launcher inside handles Escape first (clearing its search, closing
+    // its menu or info dialog) and marks the event when it did.
+    if (open && e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); hide(true); return; }
+    if (shortcut && !e.repeat && matchesShortcut(e, shortcut)) {
       e.preventDefault();
-      if (open) hide(true); else activate();
+      if (open) hide(true);
+      else if (!intercept?.()) activate();
     }
   }
   function onPointerdown(e: PointerEvent) {
@@ -98,7 +108,7 @@
       aria-expanded={open}
       aria-controls={open ? panelId : undefined}
       aria-haspopup="dialog"
-      aria-keyshortcuts="Control+K Meta+K"
+      aria-keyshortcuts={shortcut ? ariaShortcut(shortcut) : undefined}
       onclick={() => (open ? hide(true) : show())}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -133,14 +143,16 @@
   .circle:focus-visible { outline: 3px solid var(--link); outline-offset: 4px }
 
   .panel {
-    position: fixed; top: 50%; left: 50%; translate: -50% -50%; z-index: var(--z-dialog);
-    box-sizing: border-box; inline-size: min(26rem, 100vw - 2rem); max-block-size: min(34rem, 100dvh - 2rem);
+    /* Centred without a transform: a transformed panel would become the
+       containing block of the launcher's fixed-position app menu. */
+    position: fixed; inset: 0; margin: auto; block-size: fit-content; z-index: var(--z-dialog);
+    box-sizing: border-box; inline-size: min(28rem, 100vw - 2rem); max-block-size: min(36rem, 100dvh - 2rem);
     overflow: auto; padding: 1rem; border: 1px solid var(--border); border-radius: 1rem;
     background: var(--surface); color: var(--text); box-shadow: var(--shadow);
     animation: expand .16s ease-out
   }
   .panel:focus { outline: none }
-  @keyframes expand { from { opacity: 0; transform: scale(.6) } }
+  @keyframes expand { from { opacity: 0; scale: .6 } }
   @media (prefers-reduced-motion: reduce) {
     .circle, .panel { transition: none; animation: none }
     .circle:hover, .circle:active, .circle[aria-expanded='true'] { transform: none }

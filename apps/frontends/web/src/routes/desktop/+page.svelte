@@ -1,6 +1,9 @@
 <script lang="ts">
   import PageHeader from '../../lib/ui/PageHeader.svelte';
   import { prefs } from '../../lib/prefs.svelte';
+  import { displayShortcut, parseShortcut } from '../../lib/launcher/keyboard';
+
+  let shortcut = $derived(prefs.launcherShortcut ? parseShortcut(prefs.launcherShortcut) : null);
 
   // The desktop surface. The launcher circle itself is drawn by AppShell,
   // centred on the primary display, above this background.
@@ -10,10 +13,11 @@
 
 <p class="hint muted">
   {#if prefs.launcherCircle}
-    Use the circle in the middle of your primary display, or press <kbd>Ctrl</kbd>+<kbd>K</kbd>, to open the launcher.
+    Use the circle in the middle of your primary display{#if shortcut}, or press <kbd>{displayShortcut(shortcut)}</kbd>,{/if}
+    to open the launcher.
   {:else}
-    Press <kbd>Ctrl</kbd>+<kbd>K</kbd> to open the launcher. You can show the launcher circle again in
-    <a href="/settings/#desktop">Settings</a>.
+    {#if shortcut}Press <kbd>{displayShortcut(shortcut)}</kbd> to open the launcher.{/if}
+    You can show the launcher circle again in <a href="/settings/#desktop">Settings</a>.
   {/if}
 </p>
 
