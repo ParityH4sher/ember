@@ -826,6 +826,9 @@ Follow-up to the entry above, before landing it:
   `src/lib/launcher/inline.ts`; `LauncherCircle` asks them through its new
   `intercept` prop. Its second page list and overlay/host files were not
   brought over. `primary-display.ts` and `election.ts` are unchanged.
+- `deploy/test-bundle.sh` (the CI `bundle` job) asserted `start_url == "./"`,
+  so it failed on 19dfa11 (`/`). It now expects `./desktop/` and also checks
+  that `/desktop/` is served.
 
 | Check | Node 22.23.5 (host) | Node 24.22.3 (`javascript-node:24-bookworm`, `CI=1`, clean `npm ci`) |
 | --- | --- | --- |
