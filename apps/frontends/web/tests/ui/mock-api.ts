@@ -40,7 +40,8 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function install(page: Page, s: MockState) {
+/** Answers /api calls on `page` from `s`; the `api` fixture does this for the default page. */
+export async function install(page: Page, s: MockState) {
   await page.route(/\/api\//, async route => {
     const request = route.request();
     const url = new URL(request.url());

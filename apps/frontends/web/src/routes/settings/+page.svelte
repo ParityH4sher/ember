@@ -51,6 +51,15 @@
     </div>
   </Card>
 
+  <Card title="Desktop" id="desktop">
+    <label class="option">
+      <input type="checkbox" checked={prefs.launcherCircle}
+        onchange={e => save({ launcherCircle: e.currentTarget.checked })}>
+      <span>Show launcher circle <small class="muted">In the middle of the desktop on your primary display.
+        <kbd>Ctrl</kbd>+<kbd>K</kbd> opens the launcher either way.</small></span>
+    </label>
+  </Card>
+
   <Card title="Where settings are kept" id="storage">
     <p>Ember's API stores no personal preferences yet, so these settings are kept in this browser
       only. They do not follow you to other devices and are cleared with this site's data.</p>

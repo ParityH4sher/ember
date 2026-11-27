@@ -4,10 +4,14 @@
 
 export type Theme = 'system' | 'light' | 'dark';
 export type Density = 'comfortable' | 'compact';
-export interface Prefs { theme: Theme; density: Density }
+export interface Prefs {
+  theme: Theme; density: Density;
+  /** Show the central launcher circle on the desktop. The shortcut works either way. */
+  launcherCircle: boolean;
+}
 
 const KEY = 'ember:prefs';
-export const defaults: Prefs = { theme: 'system', density: 'comfortable' };
+export const defaults: Prefs = { theme: 'system', density: 'comfortable', launcherCircle: true };
 const themes: Theme[] = ['system', 'light', 'dark'];
 const densities: Density[] = ['comfortable', 'compact'];
 
@@ -15,10 +19,11 @@ function read(): Prefs {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(KEY) ?? 'null');
     if (!raw || typeof raw !== 'object') return { ...defaults };
-    const { theme, density } = raw as Record<string, unknown>;
+    const { theme, density, launcherCircle } = raw as Record<string, unknown>;
     return {
       theme: themes.includes(theme as Theme) ? theme as Theme : defaults.theme,
-      density: densities.includes(density as Density) ? density as Density : defaults.density
+      density: densities.includes(density as Density) ? density as Density : defaults.density,
+      launcherCircle: typeof launcherCircle === 'boolean' ? launcherCircle : defaults.launcherCircle
     };
   } catch {
     return { ...defaults };

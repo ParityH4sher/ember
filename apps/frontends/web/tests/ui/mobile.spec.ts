@@ -22,3 +22,16 @@ test('the sign-in page fits a phone', async ({ page, api: _ }) => {
   await page.goto('/login/');
   await expect(page.getByRole('button', { name: 'Sign in with Authentik' })).toBeInViewport();
 });
+
+test('the launcher circle scales down and its launcher fits a phone', async ({ page, api }) => {
+  signedIn(api);
+  await page.goto('/desktop/');
+  const circle = page.getByRole('button', { name: 'Open app launcher' });
+  const box = (await circle.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(56);
+  expect(box.width).toBeLessThan(80);
+  await circle.tap();
+  const panel = (await page.getByRole('dialog', { name: 'App launcher' }).boundingBox())!;
+  expect(panel.x).toBeGreaterThanOrEqual(0);
+  expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+});

@@ -8,6 +8,11 @@
   --accent: #f0883e; --accent-text: #1a0e04;
   --ok: #3fb950; --warn: #f0b44c; --danger: #ffb4a8; --warn-bg: #453817;
   --space: 1.2rem; --radius: .4rem; --control-pad: .35rem .6rem;
+  --shadow: 0 8px 24px rgb(0 0 0 / .45);
+  /* Launcher circle diameter: 56px on small screens up to 80px. */
+  --launcher-circle-size: clamp(56px, 16vmin, 80px);
+  /* Stacking order: desktop background < launcher circle < app windows < dialogs. */
+  --z-desktop: 0; --z-launcher-circle: 5; --z-window: 100; --z-dialog: 1000;
   color-scheme: dark;
   font: 16px/1.5 system-ui, sans-serif; color: var(--text); background: var(--bg);
 }
@@ -17,6 +22,7 @@
   --text: #1b232c; --muted: #56616d; --link: #0b5cad;
   --accent: #c2550f; --accent-text: #ffffff;
   --ok: #1a7f37; --warn: #9a6700; --danger: #b42318; --warn-bg: #fff4d6;
+  --shadow: 0 8px 24px rgb(27 35 44 / .18);
   color-scheme: light;
 }
 @media (prefers-color-scheme: light) {
@@ -26,6 +32,7 @@
     --text: #1b232c; --muted: #56616d; --link: #0b5cad;
     --accent: #c2550f; --accent-text: #ffffff;
     --ok: #1a7f37; --warn: #9a6700; --danger: #b42318; --warn-bg: #fff4d6;
+    --shadow: 0 8px 24px rgb(27 35 44 / .18);
     color-scheme: light;
   }
 }

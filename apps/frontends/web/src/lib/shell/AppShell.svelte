@@ -1,30 +1,22 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
-  import Icon, { type IconName } from '../ui/Icon.svelte';
+  import Icon from '../ui/Icon.svelte';
   import UserMenu from './UserMenu.svelte';
+  import LauncherCircle from '../desktop/LauncherCircle.svelte';
   import { auth, signIn } from '../session.svelte';
+  import { prefs } from '../prefs.svelte';
+  import { visibleSections } from './nav';
 
   let { children }: { children: Snippet } = $props();
 
-  interface Item { href: string; label: string; icon: IconName; admin?: boolean }
-  const sections: { label: string; items: Item[] }[] = [
-    { label: 'Workspace', items: [
-      { href: '/', label: 'Dashboard', icon: 'home' },
-      { href: '/apps/notes/', label: 'Project notes', icon: 'notes' },
-      { href: '/plugins/', label: 'Plugins', icon: 'plugin' }
-    ] },
-    { label: 'You', items: [
-      { href: '/account/', label: 'Profile & account', icon: 'user' },
-      { href: '/settings/', label: 'Settings', icon: 'settings' }
-    ] },
-    { label: 'Instance', items: [{ href: '/admin/', label: 'Admin', icon: 'shield', admin: true }] }
-  ];
-
-  let drawer = $state(false);
+  let drawer = $state(false), launcher = $state(false);
+  let sections = $derived(visibleSections(auth.admin));
+  // The circle belongs to the desktop surface; the shortcut works everywhere.
+  let desktop = $derived(page.url.pathname === '/desktop/');
   const current = (href: string) => href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
   // Navigating closes the drawer on narrow screens.
-  $effect(() => { void page.url.pathname; drawer = false; });
+  $effect(() => { void page.url.pathname; drawer = false; launcher = false; });
 </script>
 
 <a class="skip" href="#content">Skip to content</a>
@@ -37,16 +29,13 @@
   </header>
   <nav id="sidebar" aria-label="Main">
     {#each sections as section}
-      {@const items = section.items.filter(i => !i.admin || auth.admin)}
-      {#if items.length}
-        <h2>{section.label}</h2>
-        <ul>
-          {#each items as item}
-            <li><a href={item.href} aria-current={current(item.href) ? 'page' : undefined}>
-              <Icon name={item.icon} /> {item.label}</a></li>
-          {/each}
-        </ul>
-      {/if}
+      <h2>{section.label}</h2>
+      <ul>
+        {#each section.items as item}
+          <li><a href={item.href} aria-current={current(item.href) ? 'page' : undefined}>
+            <Icon name={item.icon} /> {item.label}</a></li>
+        {/each}
+      </ul>
     {/each}
   </nav>
   <button class="scrim" aria-label="Close menu" tabindex="-1" onclick={() => (drawer = false)}></button>
@@ -61,6 +50,19 @@
     {@render children()}
   </main>
 </div>
+
+<LauncherCircle enabled={desktop && prefs.launcherCircle} bind:open={launcher}>
+  <h2 class="launcher-title">Launcher</h2>
+  {#each sections as section}
+    <h3 class="launcher-section">{section.label}</h3>
+    <ul class="launcher-grid">
+      {#each section.items as item}
+        <li><a href={item.href} aria-current={current(item.href) ? 'page' : undefined}>
+          <Icon name={item.icon} size={24} /> {item.label}</a></li>
+      {/each}
+    </ul>
+  {/each}
+</LauncherCircle>
 
 <style>
   .skip { position: absolute; left: -999px; top: .5rem; z-index: 50; background: var(--surface); padding: .4rem .8rem }
@@ -96,6 +98,14 @@
     padding: .7rem 1rem; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn)
   }
   .expired p { margin: 0; flex: 1 1 20rem }
+  .launcher-title { margin: 0 0 .5rem; font-size: 1.1rem }
+  .launcher-section { margin: .8rem 0 .3rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+  .launcher-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .4rem }
+  .launcher-grid a {
+    display: grid; justify-items: center; gap: .3rem; padding: .7rem .4rem; border-radius: .6rem;
+    color: inherit; text-decoration: none; text-align: center; font-size: .9rem
+  }
+  .launcher-grid a:hover, .launcher-grid a[aria-current] { background: var(--surface-2) }
   @media (max-width: 52rem) {
     .shell { grid-template: "top" auto "main" 1fr / minmax(0, 1fr) }
     .menu-button { display: inline-flex }
