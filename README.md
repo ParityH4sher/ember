@@ -24,6 +24,12 @@ The GitHub Actions artifact is a portable deployment bundle, not a complete
 Ember product or a claim of production security. Application capabilities will
 be added behind the documented platform boundaries.
 
+## Desktop use
+
+The installed Notes app can open a blank workspace on every display. See
+[multi-display](docs/multi-display.md). To keep a window above others, see
+[always on top](docs/always-on-top.md).
+
 ## Repository map
 
 ```text

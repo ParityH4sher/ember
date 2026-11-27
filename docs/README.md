@@ -39,6 +39,10 @@ devcontainer and hot-reload setup.
 - [Operations](operations/README.md): local Compose setup, Ansible provisioning,
   CI artifacts, and known operational limitations.
 - [Build and deploy](deployment.md): API bundle installation and requirements.
+- [Multi-display](multi-display.md): opening Notes with a blank workspace on
+  every display, browser limits, and troubleshooting.
+- [Always on top](always-on-top.md): "Pin to top" in Notes and operating
+  system options for keeping windows above others.
 - [Sign-in (OIDC)](authentication.md): optional OpenID Connect sign-in, its
   configuration file, and provider setup.
 - [API reference](api-reference.md): hosted OpenAPI contract and interactive

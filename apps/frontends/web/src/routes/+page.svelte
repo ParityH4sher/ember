@@ -6,6 +6,12 @@
     type Notes, type Project, type Session
   } from '../lib/api';
   import { blocks } from '../lib/links';
+  import { DisplayManager } from '../lib/display-manager.svelte';
+  import DisplayOffer from '../lib/DisplayOffer.svelte';
+  import DisplaySettings from '../lib/DisplaySettings.svelte';
+  import NotePreview from '../lib/NotePreview.svelte';
+  import PinnedNote from '../lib/PinnedNote.svelte';
+  import { pinSupported, pinToTop } from '../lib/pin';
   import '../notes.css';
 
   let projects = $state<Project[]>([]), project = $state(''), path = $state('');
@@ -19,6 +25,18 @@
     [...blocks(notes[p] ?? '', p, notes)].some(([,parts]) => parts.some(t => t.path === path))));
 
   const query = (dest: string) => '?' + new URLSearchParams({project, note: dest});
+  const href = (dest: string) => new URL(query(dest), location.href).href;
+  const displays = new DisplayManager();
+
+  // "Pin to top": the pinned window shows one note and follows saves to it.
+  let canPin = $state(false);
+  let pinned = $state<{path: string; notes: Notes; href: typeof href; follow: typeof follow} | null>(null);
+  $effect(() => { if (pinned) pinned.notes = notes; });
+  async function pin() {
+    const props = $state({path, notes, href, follow});
+    await pinToTop(PinnedNote, props, `${path} · Ember`, () => { if (pinned === props) pinned = null; });
+    pinned = props;
+  }
   const leave = () => !dirty || confirm('Discard unsaved changes?');
 
   async function action(fn: () => Promise<void>) {
@@ -108,7 +126,10 @@
     window.addEventListener('offline', network);
     window.addEventListener('beforeunload', unload);
     action(load);
+    canPin = pinSupported();
+    const stopDisplays = displays.start();
     return () => {
+      stopDisplays();
       window.removeEventListener('online', network);
       window.removeEventListener('offline', network);
       window.removeEventListener('beforeunload', unload);
@@ -121,6 +142,7 @@
   <a href={query(dest)} onclick={(e) => follow(e, dest)}>{label}</a>
 {/snippet}
 <header><a href="/" data-sveltekit-reload>Ember</a> / Project notes
+  <DisplaySettings {displays} />
   {#if session?.authenticated}
     <span id="account">{session.user?.name || session.user?.email || session.user?.subject}
       <button id="sign-out" onclick={() => action(logout)}>Sign out</button></span>
@@ -157,16 +179,14 @@
         {#if editing}
           <button id="save" onclick={() => action(save)}>Save</button>
           <button onclick={() => { if (leave()) openNote(Object.hasOwn(notes,path) ? path : 'index.md'); }}>Cancel</button>
-        {:else}<button id="edit" onclick={() => { draft = notes[path] ?? ''; editing = true; }}>Edit</button>{/if}
+        {:else}<button id="edit" onclick={() => { draft = notes[path] ?? ''; editing = true; }}>Edit</button>
+          {#if canPin}<button id="pin" onclick={() => action(pin)} title="Keep this note in a small window above other windows">Pin to top</button>{/if}
+        {/if}
       </div>
       {#if editing}
         <textarea id="editor" aria-label="Markdown source" bind:value={draft}></textarea>
       {:else}
-        <article id="preview">
-          {#each [...blocks(notes[path] ?? '', path, notes)] as [tag, parts]}
-            <svelte:element this={tag}>{#each parts as part}{#if part.path}{@render link(part.text,part.path)}{:else}{part.text}{/if}{/each}</svelte:element>
-          {/each}
-        </article>
+        <NotePreview {path} {notes} {href} {follow} />
       {/if}
       <h2>Backlinks</h2><nav id="backlinks" aria-label="Notes linking here">
         {#each references as ref}{@render link(ref, ref)}{:else}No notes link here yet.{/each}
@@ -174,3 +194,4 @@
     {/if}
   </section>
 </main>
+<DisplayOffer {displays} />

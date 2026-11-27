@@ -21,3 +21,11 @@ article pre {overflow:auto;background:#202b36;padding:.5rem}
 #account {float:right;overflow-wrap:anywhere}
 #account button {margin-left:.5rem;padding:.1rem .5rem}
 @media(max-width:42rem){main{grid-template-columns:1fr}}
+/* Window Controls Overlay: the header doubles as the title bar and stays clear of the window buttons. */
+header {-webkit-app-region:drag}
+header a,header button {-webkit-app-region:no-drag}
+@media (display-mode:window-controls-overlay) {
+  header {padding-inline:calc(env(titlebar-area-x,0px) + 1.2rem) calc(100vw - env(titlebar-area-x,0px) - env(titlebar-area-width,100vw) + 1.2rem)}
+}
+#displays-button {margin-left:.5rem;padding:.1rem .5rem}
+#display-offer button,#displays-settings button {cursor:pointer}
