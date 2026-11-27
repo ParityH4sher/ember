@@ -11,6 +11,7 @@ services:
     read_only: true
     volumes:
       - projects:/var/lib/ember/projects
+      - ai:/var/lib/ember/ai
     cap_drop:
       - ALL
     security_opt:
@@ -77,3 +78,6 @@ networks:
 
 volumes:
   projects:
+  # The admin AI catalog: model providers (with their API keys), models and
+  # agents. Back it up like a secret.
+  ai:

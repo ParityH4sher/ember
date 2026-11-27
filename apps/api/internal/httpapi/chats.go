@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ParityH4sher/ember/apps/api/internal/agents"
+	"github.com/ParityH4sher/ember/apps/api/internal/aicatalog"
 	"github.com/ParityH4sher/ember/apps/api/internal/projects"
 )
 
@@ -138,13 +139,65 @@ func (r *ChatRuns) runningNow() map[string]bool {
 type chatAPI struct {
 	vaults   *projects.Vaults
 	runs     *ChatRuns
+	catalog  *aicatalog.Store // agents added by admins; may be nil
 	projects projects.Store
 }
 
+// agentInfo is an agent as GET /v1/agents lists it.
+type agentInfo struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Harness string `json:"harness,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+// chatAgent is what a chat turn needs to know about its agent.
+type chatAgent struct {
+	router string           // policy name in the sandbox router
+	model  *agents.ModelRef // nil when no model is configured
+}
+
+// resolveAgent finds an agent in the operator's agents file, then among the
+// enabled agents an admin added.
+func (h *chatAPI) resolveAgent(id string) (chatAgent, bool) {
+	if h.runs == nil {
+		return chatAgent{}, false
+	}
+	if a, ok := h.runs.config.Agent(id); ok {
+		return chatAgent{router: a.ID}, true
+	}
+	if h.catalog == nil {
+		return chatAgent{}, false
+	}
+	r, ok := h.catalog.Agent(id)
+	if !ok {
+		return chatAgent{}, false
+	}
+	out := chatAgent{router: r.Agent.RouterAgent}
+	if r.Model != nil && r.Provider != nil {
+		out.model = &agents.ModelRef{
+			ID: r.Model.ID, Name: r.Model.Name, ProviderKind: r.Provider.Kind,
+			Upstream: r.Model.Upstream, Local: r.Provider.Local,
+		}
+	}
+	return out, true
+}
+
 func (h *chatAPI) listAgents(w http.ResponseWriter, _ *http.Request) {
-	list := []agents.Agent{}
+	list := []agentInfo{}
 	if h.runs != nil {
-		list = append(list, h.runs.config.Agents...)
+		for _, a := range h.runs.config.Agents {
+			list = append(list, agentInfo{ID: a.ID, Name: a.Name})
+		}
+		if h.catalog != nil {
+			models := map[string]string{}
+			for _, m := range h.catalog.View().Models {
+				models[m.ID] = m.Name
+			}
+			for _, a := range h.catalog.EnabledAgents() {
+				list = append(list, agentInfo{ID: a.ID, Name: a.Name, Harness: a.Harness, Model: models[a.DefaultModel]})
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": h.runs != nil, "agents": list})
 }
@@ -199,7 +252,7 @@ func (h *chatAPI) create(w http.ResponseWriter, r *http.Request) {
 		agentsUnavailable(w)
 		return
 	}
-	if _, ok := h.runs.config.Agent(body.Agent); !ok {
+	if _, ok := h.resolveAgent(body.Agent); !ok {
 		writeError(w, http.StatusBadRequest, "unknown_agent", "choose an agent listed by /v1/agents")
 		return
 	}
@@ -267,7 +320,7 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 		chatError(w, err)
 		return
 	}
-	agent, ok := h.runs.config.Agent(chat.Agent)
+	agent, ok := h.resolveAgent(chat.Agent)
 	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "agents_unavailable", "this chat's agent is no longer offered on this instance")
 		return
@@ -307,9 +360,10 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 		if c.Title == "" {
 			c.Title = titleFrom(content)
 		}
-		fitted, err := agents.Fit(agent.ID, agents.Turn{
+		fitted, err := agents.Fit(agent.router, agents.Turn{
 			Project:  agents.ProjectRef{ID: projectID, Name: h.projectName(projectID)},
 			Chat:     agents.ChatRef{ID: c.ID, Title: c.Title},
+			Model:    agent.model,
 			Messages: append(history(c.Messages), agents.Message{Role: "user", Content: content}),
 		})
 		if err != nil {
@@ -327,7 +381,7 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started = true
-	go h.runs.run(h.vaults, projectID, chatID, pendingID, agent.ID, turn)
+	go h.runs.run(h.vaults, projectID, chatID, pendingID, agent.router, turn)
 	writeJSON(w, http.StatusAccepted, saved)
 }
 

@@ -36,14 +36,26 @@ type ChatRef struct {
 	Title string `json:"title"`
 }
 
+// ModelRef names the model an admin chose for the agent. It carries no
+// endpoint or credential: the agent asks the model gateway for this alias.
+type ModelRef struct {
+	ID           string `json:"id"`           // Ember alias, the gateway's model name
+	Name         string `json:"name"`         // label people see
+	ProviderKind string `json:"providerKind"` // anthropic, openai, ollama, openai-compatible
+	Upstream     string `json:"upstream"`     // the provider's own model ID
+	Local        bool   `json:"local"`        // served on the operator's network
+}
+
 // Turn is the document an agent receives on stdin for one chat turn. The last
 // message is the one the agent should answer. It is data, not a grant: it
 // cannot give the agent tools, files or network access.
 type Turn struct {
-	Schema   string     `json:"schema"`
-	Project  ProjectRef `json:"project"`
-	Chat     ChatRef    `json:"chat"`
-	Messages []Message  `json:"messages"`
+	Schema  string     `json:"schema"`
+	Project ProjectRef `json:"project"`
+	Chat    ChatRef    `json:"chat"`
+	// Model is present for agents configured by an admin with a model.
+	Model    *ModelRef `json:"model,omitempty"`
+	Messages []Message `json:"messages"`
 	// OmittedMessages counts the oldest messages left out to fit the router's
 	// input limit.
 	OmittedMessages int `json:"omittedMessages"`

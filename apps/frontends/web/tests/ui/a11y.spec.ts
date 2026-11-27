@@ -4,7 +4,7 @@ import { expect, grace, menuButton, signedIn, test } from './mock-api';
 // Automated WCAG 2.1 A/AA checks with axe-core on every page, in both themes.
 // Axe finds a subset of problems; keyboard and screen-reader checks are
 // separate tests or manual.
-const pages = ['/login/', '/', '/desktop/', '/apps/notes/', '/plugins/', '/settings/', '/account/', '/admin/', '/no-such-page/'];
+const pages = ['/login/', '/', '/desktop/', '/apps/notes/', '/plugins/', '/settings/', '/account/', '/admin/', '/admin/ai/', '/no-such-page/'];
 
 for (const theme of ['dark', 'light'] as const) {
   for (const path of pages) {

@@ -34,8 +34,13 @@ export const sections: NavSection[] = [
     { id: 'ember.settings', href: '/settings/', label: 'Settings', icon: 'settings',
       description: 'Theme, density, launcher circle and shortcut.', keywords: ['preferences', 'theme', 'dark', 'light', 'shortcut'] }
   ] },
-  { label: 'Instance', items: [{ id: 'ember.admin', href: '/admin/', label: 'Admin', icon: 'shield', admin: true,
-    description: 'Plugins, agents and access for this instance.', keywords: ['instance', 'operator'] }] }
+  { label: 'Instance', items: [
+    { id: 'ember.admin', href: '/admin/', label: 'Admin', icon: 'shield', admin: true,
+      description: 'Plugins, agents and access for this instance.', keywords: ['instance', 'operator'] },
+    { id: 'ember.admin.ai', href: '/admin/ai/', label: 'Agents & models', icon: 'agent', admin: true,
+      description: 'Model providers, models and agents for project chat.',
+      keywords: ['ai', 'llm', 'claude', 'codex', 'openai', 'ollama', 'provider', 'api key'] }
+  ] }
 ];
 
 /** Sections with the items this person may see; empty sections dropped. */

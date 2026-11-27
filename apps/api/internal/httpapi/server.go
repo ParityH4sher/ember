@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/ParityH4sher/ember/apps/api/internal/aicatalog"
 	"github.com/ParityH4sher/ember/apps/api/internal/auth"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/immich"
@@ -35,13 +36,27 @@ func NewHandler(version string, vaults *projects.Vaults, services ...ServiceLink
 type Option func(*options)
 
 type options struct {
-	chatRuns *ChatRuns
+	chatRuns  *ChatRuns
+	catalog   *aicatalog.Store
+	discovery *http.Client
 }
 
 // WithChatRuns lets chats start agent runs. Without it, chats are read-only
 // and GET /v1/agents reports enabled: false.
 func WithChatRuns(runs *ChatRuns) Option {
 	return func(o *options) { o.chatRuns = runs }
+}
+
+// WithAICatalog uses store for the providers, models and agents admins
+// configure. Without it, the handler keeps an in-memory catalog.
+func WithAICatalog(store *aicatalog.Store) Option {
+	return func(o *options) { o.catalog = store }
+}
+
+// WithDiscoveryClient sets the HTTP client that lists a provider's models,
+// for tests. The default follows no redirects and times out.
+func WithDiscoveryClient(client *http.Client) Option {
+	return func(o *options) { o.discovery = client }
 }
 
 func NewDeploymentHandler(version string, vaults *projects.Vaults, services []ServiceLink, extra []plugins.Registration, opts ...Option) http.Handler {
@@ -96,8 +111,31 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 	route("POST /v1/projects", auth.RoleUser, server.createProject)
 	route("GET /v1/projects", auth.RoleUser, server.listProjects)
 	route("DELETE /v1/projects/{projectId}", auth.RoleUser, server.deleteProject)
-	chats := &chatAPI{runs: o.chatRuns, projects: store}
+	if o.catalog == nil {
+		o.catalog, _ = aicatalog.Open("", nil) // in memory; cannot fail
+	}
+	if o.discovery == nil {
+		o.discovery = aicatalog.NewDiscoveryClient()
+	}
+	chats := &chatAPI{runs: o.chatRuns, catalog: o.catalog, projects: store}
 	route("GET /v1/agents", auth.RoleUser, chats.listAgents)
+	ai := &aiAdmin{catalog: o.catalog, client: o.discovery, chats: chats, operator: func() []agentInfo {
+		list := []agentInfo{}
+		if chats.runs != nil {
+			for _, a := range chats.runs.config.Agents {
+				list = append(list, agentInfo{ID: a.ID, Name: a.Name})
+			}
+		}
+		return list
+	}}
+	route("GET /v1/admin/ai", auth.RoleAdmin, ai.get)
+	route("PUT /v1/admin/ai/providers/{id}", auth.RoleAdmin, ai.putProvider)
+	route("DELETE /v1/admin/ai/providers/{id}", auth.RoleAdmin, ai.deleteProvider)
+	route("POST /v1/admin/ai/providers/{id}/discover", auth.RoleAdmin, ai.discover)
+	route("PUT /v1/admin/ai/models/{id}", auth.RoleAdmin, ai.putModel)
+	route("DELETE /v1/admin/ai/models/{id}", auth.RoleAdmin, ai.deleteModel)
+	route("PUT /v1/admin/ai/agents/{id}", auth.RoleAdmin, ai.putAgent)
+	route("DELETE /v1/admin/ai/agents/{id}", auth.RoleAdmin, ai.deleteAgent)
 	if vaults, ok := store.(*projects.Vaults); ok {
 		route("GET /v1/projects/{projectId}/notes", auth.RoleUser, listNotes(vaults))
 		route("PUT /v1/projects/{projectId}/notes", auth.RoleUser, saveNote(vaults))

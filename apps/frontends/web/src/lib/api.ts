@@ -22,8 +22,27 @@ export interface PluginOperation {
   inputSchema: Schema; outputSchema: Schema
 }
 export interface PluginCatalog { pluginVersion: string; apiVersion: string; operations: PluginOperation[] }
-export interface Agent { id: string; name: string }
+/** harness and model are set for agents an admin added on the Agents & models page. */
+export interface Agent { id: string; name: string; harness?: string; model?: string }
 export interface AgentList { enabled: boolean; agents: Agent[] }
+
+// Agents & models (admin only). Keys are sent, never returned: a provider
+// only reports whether it has one.
+export type ProviderKind = 'anthropic' | 'openai' | 'ollama' | 'openai-compatible';
+export interface ModelProvider {
+  id: string; name: string; kind: ProviderKind; baseURL: string; local: boolean; hasAPIKey: boolean
+}
+export interface ProviderInput {
+  name: string; kind: ProviderKind; baseURL: string; local: boolean; apiKey?: string; clearApiKey?: boolean
+}
+export interface CatalogModel { id: string; name: string; provider: string; upstream: string }
+export interface CatalogAgent {
+  id: string; name: string; harness: string; routerAgent: string; models: string[]; defaultModel?: string; enabled: boolean
+}
+export interface AICatalog {
+  persisted: boolean; chatEnabled: boolean; providerKinds: ProviderKind[]; harnesses: string[];
+  operatorAgents: Agent[]; providers: ModelProvider[]; models: CatalogModel[]; agents: CatalogAgent[]
+}
 export interface ChatMessage {
   id: string; role: 'user' | 'agent'; content: string; created: string;
   status?: 'pending' | 'completed' | 'failed'; error?: string; run?: string;
@@ -116,6 +135,36 @@ export function operationPath(id: string, apiVersion: string, operationId: strin
 }
 export async function invokeOperation(path: string, input: Record<string, unknown>): Promise<{data?: unknown}> {
   return (await request(path, 'POST', input)).json();
+}
+
+const ai = '/api/v1/admin/ai';
+const aiItem = (kind: 'providers' | 'models' | 'agents', id: string) => `${ai}/${kind}/${encodeURIComponent(id)}`;
+/** Needs the admin role. */
+export async function getAICatalog(): Promise<AICatalog> {
+  return (await request(ai)).json();
+}
+/** Needs the admin role. Omitting apiKey keeps the stored key unless the URL or kind changes. */
+export async function saveProvider(id: string, input: ProviderInput): Promise<ModelProvider> {
+  return (await request(aiItem('providers', id), 'PUT', input)).json();
+}
+export async function deleteProvider(id: string): Promise<void> {
+  await request(aiItem('providers', id), 'DELETE');
+}
+/** Lists the model IDs the provider offers, fetched by the API with the stored key. */
+export async function discoverModels(id: string): Promise<string[]> {
+  return (await (await request(`${aiItem('providers', id)}/discover`, 'POST')).json()).models;
+}
+export async function saveModel(id: string, model: Omit<CatalogModel, 'id'>): Promise<CatalogModel> {
+  return (await request(aiItem('models', id), 'PUT', model)).json();
+}
+export async function deleteModel(id: string): Promise<void> {
+  await request(aiItem('models', id), 'DELETE');
+}
+export async function saveAgent(id: string, agent: Omit<CatalogAgent, 'id'>): Promise<CatalogAgent> {
+  return (await request(aiItem('agents', id), 'PUT', agent)).json();
+}
+export async function deleteAgent(id: string): Promise<void> {
+  await request(aiItem('agents', id), 'DELETE');
 }
 
 /** Agents the operator registered; chat runs are off when enabled is false. */

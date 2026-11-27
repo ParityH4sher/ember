@@ -16,7 +16,8 @@
     pin: 'M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v7',
     info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5',
     close: 'M6 6l12 12M18 6 6 18',
-    plus: 'M12 5v14M5 12h14'
+    plus: 'M12 5v14M5 12h14',
+    agent: 'M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4'
   } as const;
   export type IconName = keyof typeof paths;
 </script>

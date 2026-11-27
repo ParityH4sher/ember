@@ -91,8 +91,9 @@ func (c *Config) validate() error {
 	if !filepath.IsAbs(c.RouterSocket) || filepath.Clean(c.RouterSocket) != c.RouterSocket {
 		return errors.New("routerSocket must be a clean absolute path")
 	}
-	if len(c.Agents) == 0 || len(c.Agents) > maxAgents {
-		return fmt.Errorf("configure between 1 and %d agents", maxAgents)
+	// No agents is valid: admins can then add them from the web app.
+	if len(c.Agents) > maxAgents {
+		return fmt.Errorf("configure at most %d agents", maxAgents)
 	}
 	seen := make(map[string]bool, len(c.Agents))
 	for _, a := range c.Agents {
@@ -109,6 +110,14 @@ func (c *Config) validate() error {
 	}
 	return nil
 }
+
+// ValidID reports whether id is a valid agent ID, which is also the form the
+// sandbox router accepts for policy names.
+func ValidID(id string) bool { return agentID.MatchString(id) }
+
+// ValidLabel reports whether s is a trimmed, non-empty, single-line label of
+// at most maxRunes printable characters.
+func ValidLabel(s string, maxRunes int) bool { return displayText(s, maxRunes) }
 
 // Agent returns the configured agent with this ID.
 func (c *Config) Agent(id string) (Agent, bool) {

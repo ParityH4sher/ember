@@ -32,6 +32,10 @@ func TestParseConfig(t *testing.T) {
 	if _, ok := c.Agent("other"); ok {
 		t.Fatal("found an agent that is not configured")
 	}
+	// An operator may list no agents and leave them to admins (aicatalog).
+	if c, err := ParseConfig([]byte(`{"routerSocket":"/r.sock","agents":[]}`)); err != nil || len(c.Agents) != 0 {
+		t.Fatalf("no agents = %v, %v; want accepted", c, err)
+	}
 	many := make([]string, 17)
 	for i := range many {
 		many[i] = fmt.Sprintf(`{"id":"a%d","name":"A"}`, i)
@@ -41,7 +45,6 @@ func TestParseConfig(t *testing.T) {
 		"trailing value":  validConfig + `{}`,
 		"relative socket": strings.Replace(validConfig, "/run/ember-router/router.sock", "router.sock", 1),
 		"unclean socket":  strings.Replace(validConfig, "/run/ember-router/", "/run/../run/ember-router/", 1),
-		"no agents":       `{"routerSocket":"/r.sock","agents":[]}`,
 		"too many agents": `{"routerSocket":"/r.sock","agents":[` + strings.Join(many, ",") + `]}`,
 		"bad id":          strings.Replace(validConfig, "chat-fixture", "Chat_Fixture", 1),
 		"duplicate id":    `{"routerSocket":"/r.sock","agents":[{"id":"a","name":"A"},{"id":"a","name":"B"}]}`,

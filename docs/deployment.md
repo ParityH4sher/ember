@@ -97,7 +97,11 @@ holds ID tokens: protect it, and leave it out of backups, because losing it
 only signs everyone out. Project chat is off by default; with sign-in on,
 `EMBER_AGENTS_CONFIG_FILE` (installer) or `ember_agents_enabled` (Ansible)
 connects the API to a sandbox router on the host (`deploy/compose.agents.yaml`,
-[project chat](project-chat.md#turn-on-chat-in-a-deployment)). There is no
+[project chat](project-chat.md#turn-on-chat-in-a-deployment)). The `ai`
+volume holds the model providers, models and agents admins add under
+**Admin → Agents & models**, including provider API keys
+(`/var/lib/ember/ai/catalog.json`, `EMBER_AI_CATALOG_FILE`); back it up and
+protect it like a secret ([agents and models](project-chat.md#agents-and-models-for-admins)). There is no
 database for application data, task execution, or agent behavior. Weather sends coordinates to Open-Meteo; its free API is
 non-commercial and requires attribution. Do not expose this prototype to an
 untrusted network or configure real upstream credentials. The Immich plugin

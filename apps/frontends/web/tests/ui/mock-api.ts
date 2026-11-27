@@ -20,6 +20,62 @@ export interface MockState {
   calls: string[];
   /** The session store is down: GET /v1/auth/session answers 503. */
   sessionUnavailable: boolean;
+  /** The admin AI catalog; keys are kept here and never sent back. */
+  ai: MockAI;
+}
+
+interface MockAI {
+  providers: { id: string; name: string; kind: string; baseURL: string; local: boolean; apiKey?: string }[];
+  models: { id: string; name: string; provider: string; upstream: string }[];
+  agents: { id: string; name: string; harness: string; routerAgent: string; models: string[]; defaultModel?: string; enabled: boolean }[];
+}
+
+const defaultURL: Record<string, string> = { anthropic: 'https://api.anthropic.com/v1', openai: 'https://api.openai.com/v1' };
+
+// A small stand-in for /v1/admin/ai (apps/api/internal/httpapi/aiadmin.go).
+function aiRoute(route: Route, s: MockState, method: string, path: string, body: () => Record<string, unknown>) {
+  if (s.enabled && s.role !== 'admin')
+    return json(route, { code: 'insufficient_role', message: 'this action needs the Ember admin role' }, 403);
+  const ai = s.ai;
+  if (path === '/v1/admin/ai' && method === 'GET') {
+    return json(route, {
+      persisted: true, chatEnabled: true,
+      providerKinds: ['anthropic', 'openai', 'ollama', 'openai-compatible'],
+      harnesses: ['claude-code', 'codex', 'opencode', 'custom'],
+      operatorAgents: [{ id: 'fixture', name: 'Fixture agent' }],
+      providers: ai.providers.map(({ apiKey, ...p }) => ({ ...p, hasAPIKey: !!apiKey })),
+      models: ai.models, agents: ai.agents
+    });
+  }
+  const m = /^\/v1\/admin\/ai\/(providers|models|agents)\/([^/]+)(\/discover)?$/.exec(path);
+  if (!m) return json(route, { code: 'not_found', message: 'no such route' }, 404);
+  const [, kind, id, discover] = m;
+  const list = ai[kind as keyof MockAI] as { id: string }[];
+  const index = list.findIndex(x => x.id === id);
+  if (discover) return json(route, { models: ['llama3.2:3b', 'qwen3:8b'] });
+  if (method === 'DELETE') {
+    if (kind === 'providers' && ai.models.some(x => x.provider === id))
+      return json(route, { code: 'in_use', message: 'a model uses this provider; delete or move it first' }, 409);
+    if (kind === 'models' && ai.agents.some(x => x.models.includes(id)))
+      return json(route, { code: 'in_use', message: 'an agent uses this model; remove it from the agent first' }, 409);
+    if (index >= 0) list.splice(index, 1);
+    return route.fulfill({ status: 204 });
+  }
+  const input = body();
+  let item: Record<string, unknown> = { ...input, id };
+  if (kind === 'providers') {
+    const old = ai.providers[index];
+    const baseURL = String(input.baseURL || defaultURL[String(input.kind)] || '');
+    const { apiKey: _key, clearApiKey, ...rest } = input;
+    item = { ...rest, id, baseURL, apiKey: clearApiKey ? undefined : (input.apiKey ?? old?.apiKey) };
+  }
+  if (kind === 'agents' && !item.defaultModel) item.defaultModel = (item.models as string[])[0];
+  if (index >= 0) list[index] = item as never; else list.push(item as never);
+  if (kind === 'providers') {
+    const { apiKey, ...p } = item;
+    return json(route, { ...p, hasAPIKey: !!apiKey });
+  }
+  return json(route, item);
 }
 
 export const ada: MockUser = { subject: '3f9c', name: 'Ada Lovelace', email: 'ada@example.com', groups: ['makers'] };
@@ -74,7 +130,10 @@ export async function install(page: Page, s: MockState) {
       return json(route, { error: 'unauthenticated', message: 'sign in required' }, 401);
 
     if (path === '/v1/services') return json(route, { services: [{ name: 'Authentik', url: 'https://auth.example.com/' }] });
-    if (path === '/v1/agents') return json(route, { enabled: true, agents: [{ id: 'fixture', name: 'Fixture agent' }] });
+    if (path === '/v1/agents') return json(route, { enabled: true, agents: [{ id: 'fixture', name: 'Fixture agent' },
+      ...s.ai.agents.filter(a => a.enabled).map(a => ({ id: a.id, name: a.name, harness: a.harness,
+        model: s.ai.models.find(m => m.id === a.defaultModel)?.name }))] });
+    if (path.startsWith('/v1/admin/ai')) return aiRoute(route, s, method, path, () => request.postDataJSON());
     if (path === '/v1/plugins') return json(route, { plugins });
     if (path === '/v1/projects') return json(route, { projects: [{ id: 'bracket', name: 'Shelf bracket' }] });
     if (path === '/v1/projects/bracket/notes') {
@@ -96,7 +155,8 @@ export const test = base.extend<{ api: MockState }>({
     const state: MockState = {
       enabled: true, user: null, role: 'user', next: { user: ada, role: 'user' },
       provider: { name: 'Authentik', accountUrl: 'https://auth.example.com/if/user/' },
-      expiredPaths: new Set(), sessionUnavailable: false, notes: { 'index.md': '# Shelf bracket\n\nSee [[loads]].' }, calls: []
+      expiredPaths: new Set(), sessionUnavailable: false, notes: { 'index.md': '# Shelf bracket\n\nSee [[loads]].' }, calls: [],
+      ai: { providers: [], models: [], agents: [] }
     };
     await install(page, state);
     await use(state);

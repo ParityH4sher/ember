@@ -260,7 +260,7 @@
           {#if agents.length > 1}
             <label for="agent">Agent</label>
             <select id="agent" bind:value={agentChoice}>
-              {#each agents as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
+              {#each agents as a (a.id)}<option value={a.id}>{a.name}{a.model ? ` (${a.model})` : ''}</option>{/each}
             </select>
           {/if}
           <button id="new-chat" onclick={() => action(newChat)}>New chat</button>

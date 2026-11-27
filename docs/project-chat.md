@@ -79,7 +79,7 @@ existing transcripts stay readable, and **New chat** is hidden.
 | Field | Meaning |
 | --- | --- |
 | `routerSocket` | Absolute path of the router's Unix socket. The API process must be able to connect to it. |
-| `agents` | 1–16 entries of `{"id", "name"}`. `id` is the agent's name in the router policy (`^[a-z][a-z0-9-]{0,62}$`); `name` is what users see. |
+| `agents` | 0–16 entries of `{"id", "name"}` (with none, admins add agents in the web app; see [Agents and models](#agents-and-models-for-admins)). `id` is the agent's name in the router policy (`^[a-z][a-z0-9-]{0,62}$`); `name` is what users see. |
 | `allowWithoutSignIn` | Optional, default `false`. While [sign-in](authentication.md) is off, the API **refuses to start** with an agents file unless this is `true`. Anyone who can reach the API can then start containers on the router's host, so use it only on loopback. |
 
 The API cannot read the router's policy. A listed `id` that the router does not
@@ -168,6 +168,8 @@ stdout. For chat that document is an `ember.chat-turn/v1` envelope:
   "schema": "ember.chat-turn/v1",
   "project": {"id": "desk", "name": "Desk organizer"},
   "chat": {"id": "3f9c2a7b1d4e8f60", "title": "Which filament for the bracket?"},
+  "model": {"id": "sonnet", "name": "Claude Sonnet", "providerKind": "anthropic",
+            "upstream": "claude-sonnet-…", "local": false},
   "messages": [
     {"role": "user", "content": "Which filament for the bracket?"},
     {"role": "agent", "content": "PETG, because…"},
@@ -182,6 +184,8 @@ stdout. For chat that document is an `ember.chat-turn/v1` envelope:
   left out.
 - `omittedMessages` says how many older messages were left out to fit the
   router's 32 KiB input limit.
+- `model` is present only for an agent an admin added with a model. It is the
+  alias to request from the model gateway, never an endpoint or a key.
 - Print the answer as plain text or Markdown, at most 64 KiB, and exit 0. Ember
   trims it, shows it as text (not HTML) and treats an empty answer as a
   failure.
@@ -189,6 +193,38 @@ stdout. For chat that document is an `ember.chat-turn/v1` envelope:
   `services/sandbox-router/chat-fixture/agent.py` is a short example.
 - The envelope is data. Nothing in it grants tools, files or network access;
   the router's profile and limits apply to every run.
+
+## Agents and models for admins
+
+Admins manage agents from the web app: **Admin → Agents & models**
+(`/admin/ai/`, API `/v1/admin/ai`). Users see the result in the **New chat**
+agent list. The page has three parts:
+
+| Part | What an admin enters | Notes |
+| --- | --- | --- |
+| **Model providers** | Name, kind (Anthropic, OpenAI, Ollama, OpenAI-compatible), base URL, API key | Anthropic and OpenAI use their public API by default and are always *hosted* (https only). Ollama and OpenAI-compatible servers can be marked *local*, which allows plain http on your network. **Fetch models** lists the provider's models through the API. |
+| **Models** | Name, provider, the provider's model ID (`qwen3:8b`, …) | The model's ID is the alias agents ask the gateway for. A model an agent uses cannot be deleted. |
+| **Agents** | Name, harness (Claude Code, Codex, OpenCode, custom), router agent, models, default model, on/off | The router agent is the image's name in the sandbox router policy on the host; registering the image is still an operator task (see [Packaging an agent](#packaging-an-agent-for-chat)). |
+
+To let admins add every agent, the operator's agents file may list no
+agents, only `routerSocket`. Agents in that file stay read-only on the page and
+their IDs cannot be reused.
+
+**Keys.** The API stores provider keys in `EMBER_AI_CATALOG_FILE` (mode 0600, the
+Compose `ai` volume) and never returns them: the page shows only "key set".
+Saving a provider with a new base URL or kind and no new key removes the stored
+key, so a key is only sent to the address it was entered for. Keys are never
+put in the chat envelope or the sandbox.
+
+**Subscriptions.** Claude Pro/Max and ChatGPT plans are not API keys. A harness
+such as Claude Code or Codex signs in with them inside its own image; check
+that your plan allows that use before relying on it (DEC-007).
+
+**Not yet.** Agents still run with `--network=none`, so a model chosen here is
+passed to the agent as a name only. Real model answers need the gateway route
+(P9): LiteLLM configured from this catalog, holding the keys, with per-agent
+virtual keys. Model choices are instance-wide; per-user approval of hosted
+models (DEC-007) is also still to do.
 
 ## Using a chat
 

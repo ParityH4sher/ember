@@ -97,14 +97,15 @@
 
   <div class="grid">
     <Card title="Agents" id="agents">
+      {#snippet actions()}<a href="/admin/ai/">Agents & models →</a>{/snippet}
       {#if agents === undefined}
         <p class="muted">Loading agents…</p>
       {:else if failure(agents)}
         <p role="alert">Unable to load agents: {agents.error}</p>
       {:else}
         <ul>
-          {#each agents.agents as a (a.id)}<li>{a.name} <span class="muted">{a.id}</span></li>
-          {:else}<li class="muted">No agents registered in the sandbox router policy.</li>{/each}
+          {#each agents.agents as a (a.id)}<li>{a.name} <span class="muted">{a.id}{a.model ? ` · ${a.model}` : ''}</span></li>
+          {:else}<li class="muted">No agents yet. Add one under Agents & models.</li>{/each}
         </ul>
       {/if}
     </Card>

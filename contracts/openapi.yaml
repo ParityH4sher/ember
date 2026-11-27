@@ -343,11 +343,12 @@ paths:
   /v1/agents:
     get:
       operationId: listAgents
-      summary: Agents the operator registered for project chat
+      summary: Agents available for project chat
       description: >-
         Chat runs are off unless the operator supplies an agents configuration
-        file (EMBER_AGENTS_CONFIG_FILE). Each agent is an image registered in the
-        sandbox router's policy; this list carries only its ID and display name.
+        file (EMBER_AGENTS_CONFIG_FILE) naming the sandbox router. The list has
+        the agents in that file followed by the enabled agents admins added
+        under /v1/admin/ai/agents. It never includes provider endpoints or keys.
       responses:
         "401":
           $ref: "#/components/responses/Unauthenticated"
@@ -359,6 +360,142 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentList"
+  /v1/admin/ai:
+    get:
+      operationId: getAICatalog
+      summary: Model providers, models and agents (admin)
+      description: >-
+        Requires the admin role. Provider keys are never returned; each
+        provider reports hasAPIKey instead.
+      responses:
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "200":
+          description: The catalog without secrets
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AICatalog"}
+  /v1/admin/ai/providers/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+    put:
+      operationId: putModelProvider
+      summary: Create or replace a model provider (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ModelProviderInput"}
+      responses:
+        "200":
+          description: The saved provider
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ModelProvider"}
+        "400": {description: Malformed body}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "422": {description: "invalid_configuration: the message says what to correct"}
+    delete:
+      operationId: deleteModelProvider
+      summary: Delete a provider and its stored key (admin)
+      responses:
+        "204": {description: Deleted}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "404": {description: No such provider}
+        "409": {description: "in_use: a model still uses this provider"}
+  /v1/admin/ai/providers/{id}/discover:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: discoverProviderModels
+      summary: List the models a provider offers (admin)
+      description: >-
+        The API calls the provider's model list (Ollama /api/tags, otherwise
+        {baseURL}/models) with the stored key, following no redirects, with a
+        10 s timeout. Upstream error bodies are not passed on.
+      responses:
+        "200":
+          description: Upstream model IDs, sorted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models: {type: array, items: {type: string}}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "404": {description: No such provider}
+        "502": {description: "discovery_failed: unreachable, refused or not a model list"}
+  /v1/admin/ai/models/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+    put:
+      operationId: putCatalogModel
+      summary: Create or replace a model alias (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, provider, upstream]
+              properties:
+                name: {type: string}
+                provider: {type: string}
+                upstream: {type: string}
+      responses:
+        "200":
+          description: The saved model
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogModel"}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "422": {description: invalid_configuration}
+    delete:
+      operationId: deleteCatalogModel
+      summary: Delete a model alias (admin)
+      responses:
+        "204": {description: Deleted}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "404": {description: No such model}
+        "409": {description: "in_use: an agent still lists this model"}
+  /v1/admin/ai/agents/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+    put:
+      operationId: putCatalogAgent
+      summary: Create or replace an agent (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, harness, routerAgent, enabled]
+              properties:
+                name: {type: string}
+                harness: {type: string}
+                routerAgent: {type: string}
+                models: {type: array, items: {type: string}}
+                defaultModel: {type: string}
+                enabled: {type: boolean}
+      responses:
+        "200":
+          description: The saved agent
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CatalogAgent"}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "422": {description: invalid_configuration}
+    delete:
+      operationId: deleteCatalogAgent
+      summary: Delete an agent (admin); its chats stay readable
+      responses:
+        "204": {description: Deleted}
+        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
+        "404": {description: No such agent}
   /v1/projects/{projectId}/chats:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -1154,10 +1291,102 @@ components:
         id:
           type: string
           pattern: '^[a-z][a-z0-9-]{0,62}$'
-          description: The agent's name in the sandbox router policy.
+          description: >-
+            The agent's ID: its sandbox router policy name for agents from the
+            operator's agents file, or the ID an admin chose under
+            /v1/admin/ai/agents.
         name:
           type: string
-          description: Display name chosen by the operator.
+          description: Display name chosen by the operator or an admin.
+        harness:
+          type: string
+          description: Set for agents an admin added; for example claude-code or codex.
+        model:
+          type: string
+          description: Display name of the agent's default model, if an admin set one.
+    ModelProvider:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, baseURL, local, hasAPIKey]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}
+        name: {type: string, maxLength: 80}
+        kind: {type: string, enum: [anthropic, openai, ollama, openai-compatible]}
+        baseURL:
+          type: string
+          format: uri
+          description: API base, e.g. https://api.anthropic.com/v1 or http://ollama.lan:11434.
+        local:
+          type: boolean
+          description: Served on the operator's network. Always false for anthropic and openai.
+        hasAPIKey:
+          type: boolean
+          description: Whether a key is stored. The key itself is never returned.
+    ModelProviderInput:
+      type: object
+      additionalProperties: false
+      required: [name, kind]
+      properties:
+        name: {type: string, maxLength: 80}
+        kind: {type: string, enum: [anthropic, openai, ollama, openai-compatible]}
+        baseURL:
+          type: string
+          description: >-
+            http(s) URL without credentials, query or fragment. Empty uses the
+            default for anthropic and openai. A hosted provider needs https.
+        local: {type: boolean}
+        apiKey:
+          type: string
+          writeOnly: true
+          maxLength: 1024
+          description: >-
+            Omit to keep the stored key. If baseURL or kind changes and apiKey
+            is omitted, the stored key is removed.
+        clearApiKey: {type: boolean}
+    CatalogModel:
+      type: object
+      additionalProperties: false
+      required: [id, name, provider, upstream]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: Alias agents ask the model gateway for.}
+        name: {type: string, maxLength: 80}
+        provider: {type: string, description: ID of a configured provider.}
+        upstream: {type: string, maxLength: 200, description: "The provider's model ID, e.g. qwen3:8b."}
+    CatalogAgent:
+      type: object
+      additionalProperties: false
+      required: [id, name, harness, routerAgent, models, enabled]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: Must not match an agent in the operator's agents file.}
+        name: {type: string, maxLength: 80}
+        harness: {type: string, enum: [claude-code, codex, opencode, custom]}
+        routerAgent:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+          description: The harness image's name in the sandbox router policy.
+        models:
+          type: array
+          maxItems: 16
+          items: {type: string}
+        defaultModel:
+          type: string
+          description: One of models; named in each chat turn. Defaults to the first.
+        enabled:
+          type: boolean
+          description: Whether people can start chats with this agent.
+    AICatalog:
+      type: object
+      additionalProperties: false
+      required: [persisted, chatEnabled, providerKinds, harnesses, operatorAgents, providers, models, agents]
+      properties:
+        persisted: {type: boolean, description: False when the API has no EMBER_AI_CATALOG_FILE.}
+        chatEnabled: {type: boolean}
+        providerKinds: {type: array, items: {type: string}}
+        harnesses: {type: array, items: {type: string}}
+        operatorAgents: {type: array, items: {$ref: "#/components/schemas/Agent"}}
+        providers: {type: array, items: {$ref: "#/components/schemas/ModelProvider"}}
+        models: {type: array, items: {$ref: "#/components/schemas/CatalogModel"}}
+        agents: {type: array, items: {$ref: "#/components/schemas/CatalogAgent"}}
     AgentList:
       type: object
       additionalProperties: false
