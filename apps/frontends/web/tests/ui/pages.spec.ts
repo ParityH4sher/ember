@@ -32,6 +32,15 @@ test('the installed app starts on the desktop surface; the dashboard stays in th
   await expect(page).toHaveURL('/');
 });
 
+test('the workspace window for other displays is blank, outside the app shell', async ({ page, api }) => {
+  api.user = null; // signed out: the workspace still renders, without a sign-in redirect
+  await page.goto('/display/?display=screen@1920,0');
+  await expect(page.getByRole('main', { name: 'Ember workspace' })).toBeVisible();
+  await expect(page).toHaveURL(/\/display\/\?display=/);
+  await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open app launcher' })).toHaveCount(0);
+});
+
 test('account page shows the identity, session and provider link', async ({ page }) => {
   await page.goto('/account/');
   await expect(page.locator('#profile').getByText(ada.email!)).toBeVisible();

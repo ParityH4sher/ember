@@ -8,6 +8,12 @@
   } from '../../../lib/api';
   import { blocks } from '../../../lib/links';
   import { setLeaveGuard } from '../../../lib/session.svelte';
+  import { DisplayManager } from '../../../lib/display-manager.svelte';
+  import DisplayOffer from '../../../lib/DisplayOffer.svelte';
+  import DisplaySettings from '../../../lib/DisplaySettings.svelte';
+  import NotePreview from '../../../lib/NotePreview.svelte';
+  import PinnedNote from '../../../lib/PinnedNote.svelte';
+  import { pinSupported, pinToTop } from '../../../lib/pin';
 
   let projects = $state<Project[]>([]), project = $state(''), path = $state('');
   let notes = $state.raw<Notes>(Object.create(null));
@@ -31,6 +37,19 @@
   const query = (dest: string) => '?' + new URLSearchParams({project, note: dest});
   const chatQuery = (id: string) => '?' + new URLSearchParams({project, chat: id});
   const leave = () => !dirty || confirm('Discard unsaved changes?');
+  const href = (dest: string) => new URL(query(dest), location.href).href;
+  // Multi-display: this Notes window opens a workspace on each other display.
+  const displays = new DisplayManager();
+
+  // "Pin to top": the pinned window shows one note and follows saves to it.
+  let canPin = $state(false);
+  let pinned = $state<{path: string; notes: Notes; href: typeof href; follow: typeof follow} | null>(null);
+  $effect(() => { if (pinned) pinned.notes = notes; });
+  async function pin() {
+    const props = $state({path, notes, href, follow});
+    await pinToTop(PinnedNote, props, `${path} · Ember`, () => { if (pinned === props) pinned = null; });
+    pinned = props;
+  }
 
   async function action(fn: () => Promise<void>) {
     if (busy) return;
@@ -196,7 +215,10 @@
     window.addEventListener('offline', network);
     setLeaveGuard(confirmLeave);
     action(load);
+    canPin = pinSupported();
+    const stopDisplays = displays.start();
     return () => {
+      stopDisplays();
       setLeaveGuard(null);
       window.removeEventListener('online', network);
       window.removeEventListener('offline', network);
@@ -211,6 +233,7 @@
 {#if offline}<p id="offline" role="status">Offline. Browse notes already loaded in this window. Reconnect to load projects or save edits.</p>{/if}
 <div class="notes" inert={busy}>
   <aside>
+    <DisplaySettings {displays} />
     <label for="project">Project</label>
     <select id="project" value={project} onchange={e => {
       const id = e.currentTarget.value; e.currentTarget.value = project;
@@ -278,16 +301,14 @@
         {#if editing}
           <button id="save" onclick={() => action(save)}>Save</button>
           <button onclick={() => { if (leave()) openNote(Object.hasOwn(notes,path) ? path : 'index.md'); }}>Cancel</button>
-        {:else}<button id="edit" onclick={() => { draft = notes[path] ?? ''; editing = true; }}>Edit</button>{/if}
+        {:else}<button id="edit" onclick={() => { draft = notes[path] ?? ''; editing = true; }}>Edit</button>
+          {#if canPin}<button id="pin" onclick={() => action(pin)} title="Keep this note in a small window above other windows">Pin to top</button>{/if}
+        {/if}
       </div>
       {#if editing}
         <textarea id="editor" aria-label="Markdown source" bind:value={draft}></textarea>
       {:else}
-        <article id="preview">
-          {#each [...blocks(notes[path] ?? '', path, notes)] as [tag, parts]}
-            <svelte:element this={tag}>{#each parts as part}{#if part.path}{@render link(part.text,part.path)}{:else}{part.text}{/if}{/each}</svelte:element>
-          {/each}
-        </article>
+        <NotePreview {path} {notes} {href} {follow} />
       {/if}
       <h2>Backlinks</h2><nav id="backlinks" aria-label="Notes linking here">
         {#each references as ref}{@render link(ref, ref)}{:else}No notes link here yet.{/each}
@@ -295,6 +316,7 @@
     {/if}
   </section>
 </div>
+<DisplayOffer {displays} />
 
 <style>
   aside {padding:var(--space)}
@@ -307,8 +329,9 @@
   .toolbar {display:flex;align-items:center;gap:.5rem;padding:.5rem;border-radius:var(--radius)}
   .toolbar strong {margin-right:auto;overflow-wrap:anywhere}
   .page {min-width:0}
-  article {min-height:10rem;white-space:pre-wrap;overflow-wrap:anywhere}
-  article :global(pre) {overflow:auto;background:var(--surface-2);padding:.5rem}
+  /* The preview is NotePreview's article, shared with the pinned window. */
+  :global(article#preview) {min-height:10rem;white-space:pre-wrap;overflow-wrap:anywhere}
+  :global(article#preview pre) {overflow:auto;background:var(--surface-2);padding:.5rem}
   #message:empty {display:none}
   @media(max-width:62rem){.notes{grid-template-columns:1fr}}
   /* Project chat */

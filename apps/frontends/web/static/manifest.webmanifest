@@ -6,6 +6,13 @@
   "start_url": "./desktop/",
   "scope": "./",
   "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
   "background_color": "#10151b",
   "theme_color": "#192129",
   "icons": [

@@ -85,6 +85,11 @@ client and its service worker. `npm run build` uses the static adapter to write
 `web/build/`. Compose builds these assets in a Node stage and serves them with
 Nginx; Node is not required on the runtime host.
 
+In Chrome and Edge, Project notes (`/apps/notes/`) in the installed app can
+open a blank workspace window (`/display/`) on every other display, and
+**Pin to top** floats a note in a Picture-in-Picture window. See
+`docs/multi-display.md` and `docs/always-on-top.md`.
+
 After the first online visit, the service worker caches the static app shell.
 Project lists, note bodies, plugins and saves go directly to the API. While
 disconnected, an already open project remains browsable in that window; keep

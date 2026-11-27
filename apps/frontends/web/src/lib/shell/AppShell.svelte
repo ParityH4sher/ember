@@ -90,6 +90,16 @@
     grid-area: top; position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: .6rem;
     padding: .5rem var(--space); background: var(--surface); border-bottom: 1px solid var(--border)
   }
+  /* Window Controls Overlay (installed app, manifest display_override): the
+     top bar doubles as the title bar and stays clear of the window buttons. */
+  .topbar { -webkit-app-region: drag }
+  .topbar :global(a), .topbar :global(button) { -webkit-app-region: no-drag }
+  @media (display-mode: window-controls-overlay) {
+    .topbar {
+      padding-inline: calc(env(titlebar-area-x, 0px) + var(--space))
+        calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + var(--space))
+    }
+  }
   .brand { margin-right: auto; font-weight: 750; font-size: 1.1rem; color: inherit; text-decoration: none }
   .mark { color: var(--accent) }
   .menu-button { display: none; border: 0; background: none; padding: .3rem }

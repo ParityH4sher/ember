@@ -15,8 +15,10 @@
 
   let { children }: { children: Snippet } = $props();
 
-  // The sign-in page stands alone; every other page needs the session first.
-  let bare = $derived(page.url.pathname === '/login/');
+  // The sign-in page and the blank workspace window on other displays
+  // (/display/, see docs/multi-display.md) stand alone; every other page needs
+  // the session first.
+  let bare = $derived(page.url.pathname === '/login/' || page.url.pathname === '/display/');
 
   onMount(() => {
     loadPrefs();
