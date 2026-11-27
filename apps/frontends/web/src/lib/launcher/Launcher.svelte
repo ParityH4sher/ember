@@ -3,17 +3,16 @@
   import Icon from '../ui/Icon.svelte';
   import type { WidgetProps } from '../widgets/types';
   import LauncherPanel from './LauncherPanel.svelte';
-  import { formatShortcut, matchesShortcut, parseShortcut } from './keyboard';
   import { launcherConfig, type LauncherConfig } from './config';
 
   // The launcher widget. In grid mode the launcher is shown in place; in
   // compact mode a single button opens it as a popover (for a narrow,
-  // taskbar-like slot). The shortcut opens or focuses it from anywhere.
+  // taskbar-like slot). The app-wide shortcut opens the shell's launcher
+  // (AppShell), not a particular widget.
   let { config: stored, setConfig, context }: WidgetProps<LauncherConfig> = $props();
 
   const uid = $props.id();
   let config = $derived(launcherConfig(stored));
-  let shortcut = $derived(parseShortcut(config.shortcut));
   let open = $state(false);
   let panel = $state<LauncherPanel>(), toggle = $state<HTMLButtonElement>(), root = $state<HTMLElement>();
   let compact = $derived(config.mode === 'compact');
@@ -28,40 +27,33 @@
     at = { left: Math.max(8, Math.min(r.left, innerWidth - width - 8)), top: r.bottom + 6 };
   }
   async function reveal() {
-    if (compact) { place(); open = true; await tick(); }
+    place();
+    open = true;
+    await tick();
     panel?.focusSearch();
   }
   function close() {
     open = false;
     toggle?.focus();
   }
-  function onkeydown(e: KeyboardEvent) {
-    // With several launchers on a page, the first one claims the shortcut.
-    if (!shortcut || e.defaultPrevented || e.repeat || !matchesShortcut(e, shortcut)) return;
-    e.preventDefault();
-    reveal();
-  }
   function outside(e: Event) {
     if (open && root && !root.contains(e.target as Node) && !(e.target as Element).closest?.('dialog')) open = false;
   }
 </script>
 
-<svelte:window {onkeydown} onpointerdown={outside} onresize={() => open && place()} onscrollcapture={() => open && place()} />
+<svelte:window onpointerdown={outside} onresize={() => open && place()} onscrollcapture={() => open && place()} />
 
 <div class="widget-launcher" class:compact bind:this={root}>
   {#if compact}
     <button bind:this={toggle} class="toggle" aria-label="App launcher" aria-expanded={open} aria-controls="{uid}-popover"
-      aria-keyshortcuts={shortcut ? formatShortcut(shortcut) : undefined}
-      title={shortcut ? `App launcher (${formatShortcut(shortcut)})` : 'App launcher'}
-      onclick={() => (open ? close() : reveal())}><Icon name="apps" size={22} /></button>
+      title="App launcher" onclick={() => (open ? close() : reveal())}><Icon name="apps" size={22} /></button>
     {#if open}
       <div class="popover" id="{uid}-popover" role="dialog" aria-label="App launcher" style:left="{at.left}px" style:top="{at.top}px">
-        <LauncherPanel bind:this={panel} {config} {setConfig} {context} onclose={close} onlaunch={() => (open = false)}
-          shortcut={shortcut ? formatShortcut(shortcut) : undefined} />
+        <LauncherPanel bind:this={panel} {config} {setConfig} {context} onclose={close} onlaunch={() => (open = false)} />
       </div>
     {/if}
   {:else}
-    <LauncherPanel bind:this={panel} {config} {setConfig} {context} shortcut={shortcut ? formatShortcut(shortcut) : undefined} />
+    <LauncherPanel bind:this={panel} {config} {setConfig} {context} />
   {/if}
 </div>
 

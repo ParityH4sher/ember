@@ -2,6 +2,7 @@
   import Card from '../../lib/ui/Card.svelte';
   import PageHeader from '../../lib/ui/PageHeader.svelte';
   import { defaults, prefs, savePrefs, type Density, type Theme } from '../../lib/prefs.svelte';
+  import { displayShortcut, formatShortcut, parseShortcut } from '../../lib/launcher/keyboard';
 
   // Display preferences only. They apply at once and stay in this browser.
   let status = $state('');
@@ -15,6 +16,21 @@
     { value: 'comfortable', label: 'Comfortable', hint: 'More space around content' },
     { value: 'compact', label: 'Compact', hint: 'Fit more on the screen' }
   ];
+
+  // The launcher shortcut: typed as text, e.g. "Mod+K" or "Ctrl+Alt+Space".
+  let shortcutDraft = $state(''), shortcutError = $state('');
+  $effect(() => { shortcutDraft = prefs.launcherShortcut; });
+  let shortcut = $derived(prefs.launcherShortcut ? parseShortcut(prefs.launcherShortcut) : null);
+  function saveShortcut() {
+    const text = shortcutDraft.trim();
+    const parsed = text ? parseShortcut(text) : null;
+    if (text && !parsed) {
+      shortcutError = 'Use a key with Mod (Ctrl, or ⌘ on a Mac), Ctrl, Alt or Meta, e.g. Mod+K or Ctrl+Alt+Space.';
+      return;
+    }
+    shortcutError = '';
+    save({ launcherShortcut: parsed ? formatShortcut(parsed) : '' });
+  }
 
   function save(next: Partial<typeof prefs>) {
     status = savePrefs(next) ? 'Saved in this browser.' : 'Applied, but this browser blocks storage, so it resets when you reload.';
@@ -56,8 +72,16 @@
       <input type="checkbox" checked={prefs.launcherCircle}
         onchange={e => save({ launcherCircle: e.currentTarget.checked })}>
       <span>Show launcher circle <small class="muted">In the middle of the desktop on your primary display.
-        <kbd>Ctrl</kbd>+<kbd>K</kbd> opens the launcher either way.</small></span>
+        The shortcut opens the launcher either way.</small></span>
     </label>
+    <label for="launcher-shortcut">Launcher shortcut</label>
+    <input id="launcher-shortcut" bind:value={shortcutDraft} onchange={saveShortcut} placeholder="Off" autocomplete="off"
+      spellcheck="false" aria-describedby="launcher-shortcut-hint" aria-invalid={shortcutError ? true : undefined}>
+    <p id="launcher-shortcut-hint" class="muted hint" class:error={shortcutError}>
+      {#if shortcutError}{shortcutError}
+      {:else}Opens the launcher from any page{#if shortcut}, currently <kbd>{displayShortcut(shortcut)}</kbd>{/if}.
+        <code>Mod</code> is Ctrl, or ⌘ on a Mac. Leave empty to turn the shortcut off.{/if}
+    </p>
   </Card>
 
   <Card title="Where settings are kept" id="storage">
@@ -76,4 +100,7 @@
   small { margin-left: .4rem }
   .row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap }
   .row p { margin: 0 }
+  .hint { font-size: .85rem; margin: 0 }
+  .error { color: var(--danger) }
+  kbd { border: 1px solid var(--border-strong); border-radius: .25rem; padding: 0 .3rem; font: inherit; font-size: .9em }
 </style>

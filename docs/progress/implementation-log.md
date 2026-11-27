@@ -780,3 +780,34 @@ Run in `mcr.microsoft.com/devcontainers/javascript-node:24-bookworm` (Node
 Not run: the `web` CI job on GitHub, the real-infrastructure suite, Safari
 and Firefox (Chromium only), and a screen reader (labels, roles and live
 regions are checked by tests and axe only).
+
+## 2026-11-27 — one launcher: circle, shortcut and widget reconciled
+
+The launcher circle (3865dcf) and the launcher widget were merged side by
+side (368a935) with two launcher UIs, two app lists and two shortcuts. Now:
+
+- The circle's dialog renders the widget's `LauncherPanel`; both read the
+  app registry and share pinned and recent apps.
+- `shell/nav.ts` is the one list of Ember's pages: the sidebar renders it and
+  `apps/static.ts` derives the built-in apps from it (Dashboard and Desktop
+  are now apps too).
+- One shortcut, configurable in Settings › Desktop (`prefs.launcherShortcut`),
+  default `Mod+K` (Ctrl+K, ⌘K on Apple). The hard-coded Ctrl+K check and the
+  per-widget Alt+Shift+L setting are gone; stored widget `shortcut` values
+  are ignored.
+- The manifest's `start_url` is `/` (the dashboard).
+- CI also runs `npm test` (the circle's election tests).
+
+Same environment as the entry above:
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | 0 errors, 0 warnings. |
+| `npm test` | 6 passed. |
+| `npm run test:unit` | 38 passed. |
+| `npm run test:ui --repeat-each 3` | 231 passed (77 tests). The first run failed 30 tests: `resolvedTheme()` wrote state inside `$derived`, so the shell did not render; fixed. |
+| `npm --prefix website run build` with `DOCS_BASE_URL=/ember/` | Built; no broken links. |
+| Screenshots of the open circle launcher (dark, light) | Reviewed. |
+
+Not run: the `web` CI job on GitHub, Firefox and Safari, a screen reader,
+and two physical displays (the election is covered by mocked tests only).

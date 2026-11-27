@@ -1,21 +1,41 @@
 import type { IconName } from '../ui/Icon.svelte';
 
-// The app's destinations, shown in the sidebar and in the launcher.
-export interface NavItem { href: string; label: string; icon: IconName; admin?: boolean }
+// The app's own pages: the one list behind both the sidebar and the built-in
+// apps in the app registry (lib/apps/static.ts derives them from it). The
+// launcher reads only the app registry, so plugins and shared services appear
+// next to these.
+export interface NavItem {
+  /** App registry id; stored in pinned and recent lists, so keep it stable. */
+  id: string;
+  href: string;
+  label: string;
+  icon: IconName;
+  description?: string;
+  keywords?: string[];
+  /** Shown to admins only; the API still enforces the role. */
+  admin?: boolean;
+}
 export interface NavSection { label: string; items: NavItem[] }
 
 export const sections: NavSection[] = [
   { label: 'Workspace', items: [
-    { href: '/', label: 'Dashboard', icon: 'home' },
-    { href: '/desktop/', label: 'Desktop', icon: 'desktop' },
-    { href: '/apps/notes/', label: 'Project notes', icon: 'notes' },
-    { href: '/plugins/', label: 'Plugins', icon: 'plugin' }
+    { id: 'ember.dashboard', href: '/', label: 'Dashboard', icon: 'home',
+      description: 'Status, projects, services and your widgets.', keywords: ['home', 'start', 'widgets'] },
+    { id: 'ember.desktop', href: '/desktop/', label: 'Desktop', icon: 'desktop',
+      description: 'The desktop surface with the launcher circle.', keywords: ['circle', 'workspace'] },
+    { id: 'ember.notes', href: '/apps/notes/', label: 'Project notes', icon: 'notes',
+      description: 'Linked Markdown notes and project chat.', keywords: ['markdown', 'wiki', 'chat', 'projects'] },
+    { id: 'ember.plugins', href: '/plugins/', label: 'Plugins', icon: 'plugin',
+      description: 'Run plugin operations and see their status.', keywords: ['integrations', 'extensions'] }
   ] },
   { label: 'You', items: [
-    { href: '/account/', label: 'Profile & account', icon: 'user' },
-    { href: '/settings/', label: 'Settings', icon: 'settings' }
+    { id: 'ember.account', href: '/account/', label: 'Profile & account', icon: 'user',
+      description: 'Your identity and session.', keywords: ['profile', 'session', 'sign out'] },
+    { id: 'ember.settings', href: '/settings/', label: 'Settings', icon: 'settings',
+      description: 'Theme, density, launcher circle and shortcut.', keywords: ['preferences', 'theme', 'dark', 'light', 'shortcut'] }
   ] },
-  { label: 'Instance', items: [{ href: '/admin/', label: 'Admin', icon: 'shield', admin: true }] }
+  { label: 'Instance', items: [{ id: 'ember.admin', href: '/admin/', label: 'Admin', icon: 'shield', admin: true,
+    description: 'Plugins, agents and access for this instance.', keywords: ['instance', 'operator'] }] }
 ];
 
 /** Sections with the items this person may see; empty sections dropped. */
@@ -23,9 +43,4 @@ export function visibleSections(admin: boolean): NavSection[] {
   return sections
     .map(s => ({ ...s, items: s.items.filter(i => !i.admin || admin) }))
     .filter(s => s.items.length);
-}
-
-/** The global launcher shortcut: Ctrl+K, or ⌘K on Apple keyboards. */
-export function isLauncherShortcut(e: KeyboardEvent): boolean {
-  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k';
 }

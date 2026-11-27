@@ -4,7 +4,9 @@ import { appsById, categoriesOf, matchScore, searchApps, sortApps } from '../../
 import {
   emptyState, parseLauncherState, reconcile, recordLaunch, RECENT_MAX, STALE_AFTER, togglePin
 } from '../../src/lib/launcher/state';
-import { formatShortcut, matchesShortcut, moveFocus, parseShortcut } from '../../src/lib/launcher/keyboard';
+import {
+  ariaShortcut, DEFAULT_SHORTCUT, displayShortcut, formatShortcut, matchesShortcut, moveFocus, parseShortcut
+} from '../../src/lib/launcher/keyboard';
 import { launcherConfig } from '../../src/lib/launcher/config';
 
 const app = (id: string, name: string, extra: Partial<AppDefinition> = {}): AppDefinition =>
@@ -150,7 +152,8 @@ test.describe('keyboard navigation', () => {
 
 test.describe('shortcuts', () => {
   test('parses, normalizes and formats', () => {
-    expect(parseShortcut('Alt+Shift+L')).toEqual({ code: 'KeyL', ctrl: false, alt: true, shift: true, meta: false });
+    expect(parseShortcut('Alt+Shift+L')).toEqual({ code: 'KeyL', mod: false, ctrl: false, alt: true, shift: true, meta: false });
+    expect(formatShortcut(parseShortcut(' mod + k ')!)).toBe('Mod+K');
     expect(formatShortcut(parseShortcut(' ctrl + alt + space ')!)).toBe('Ctrl+Alt+Space');
     expect(formatShortcut(parseShortcut('cmd+k')!)).toBe('Meta+K');
     expect(formatShortcut(parseShortcut('Option+1')!)).toBe('Alt+1');
@@ -158,7 +161,7 @@ test.describe('shortcuts', () => {
   });
 
   test('rejects shortcuts that would take over typing, and nonsense', () => {
-    for (const bad of ['', 'L', 'Shift+L', 'Hyper+L', 'Alt+', 'Alt+Shift+Tab', 'Ctrl+Alt+Shift+Meta+Super+L'])
+    for (const bad of ['', 'L', 'Shift+L', 'Hyper+L', 'Alt+', 'Alt+Shift+Tab', 'Ctrl+Alt+Shift+Meta+Super+L', 'Mod+Ctrl+K', 'Mod+Meta+K'])
       expect(parseShortcut(bad), bad).toBeNull();
   });
 
@@ -169,9 +172,23 @@ test.describe('shortcuts', () => {
     expect(matchesShortcut({ ...e, ctrlKey: true }, s)).toBe(false);
     expect(matchesShortcut({ ...e, code: 'KeyK' }, s)).toBe(false);
   });
+
+  test('the default is Mod+K: Ctrl+K, or ⌘K on Apple keyboards', () => {
+    const s = parseShortcut(DEFAULT_SHORTCUT)!;
+    const none = { code: 'KeyK', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
+    expect(matchesShortcut({ ...none, ctrlKey: true }, s)).toBe(true);
+    expect(matchesShortcut({ ...none, metaKey: true }, s)).toBe(true);
+    expect(matchesShortcut(none, s)).toBe(false);
+    expect(matchesShortcut({ ...none, ctrlKey: true, metaKey: true }, s)).toBe(false);
+    expect(matchesShortcut({ ...none, ctrlKey: true, shiftKey: true }, s)).toBe(false);
+    expect(displayShortcut(s, false)).toBe('Ctrl+K');
+    expect(displayShortcut(s, true)).toBe('⌘K');
+    expect(ariaShortcut(s)).toBe('Control+K Meta+K');
+    expect(ariaShortcut(parseShortcut('Alt+Shift+L')!)).toBe('Alt+Shift+L');
+  });
 });
 
-test('launcher config falls back field by field', () => {
-  expect(launcherConfig({ mode: 'compact', recentLimit: 99, shortcut: 7, showRecent: 'yes', category: '' }))
-    .toEqual({ mode: 'compact', shortcut: 'Alt+Shift+L', showRecent: true, recentLimit: 12, category: 'all' });
+test('launcher config falls back field by field and drops the old per-widget shortcut', () => {
+  expect(launcherConfig({ mode: 'compact', recentLimit: 99, showRecent: 'yes', category: '', shortcut: 'Alt+Shift+L' } as never))
+    .toEqual({ mode: 'compact', showRecent: true, recentLimit: 12, category: 'all' });
 });

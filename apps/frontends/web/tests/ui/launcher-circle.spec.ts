@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 import { expect, install, signedIn, test } from './mock-api';
 
@@ -49,8 +50,9 @@ test('the circle opens the launcher; Escape closes it and refocuses the circle',
   await circle(page).click();
   await expect(launcher(page)).toBeVisible();
   await expect(circle(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(launcher(page).getByRole('link', { name: 'Project notes' })).toBeVisible();
-  await expect(launcher(page).getByRole('link').first()).toBeFocused();
+  // The same launcher as the widget: apps from the app registry, search first.
+  await expect(launcher(page).getByRole('button', { name: 'Project notes', exact: true })).toBeVisible();
+  await expect(launcher(page).getByRole('searchbox', { name: 'Search apps' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(launcher(page)).toBeHidden();
   await expect(circle(page)).toBeFocused();
@@ -86,7 +88,7 @@ test('the shortcut focuses the circle and opens the launcher, and works on other
   await expect(circle(page)).toHaveCount(0);
   await page.keyboard.press('Control+k');
   await expect(launcher(page)).toBeVisible();
-  await launcher(page).getByRole('link', { name: 'Desktop' }).click();
+  await launcher(page).getByRole('button', { name: 'Desktop', exact: true }).click();
   await expect(page).toHaveURL('/desktop/');
   await expect(circle(page)).toBeVisible();
 });
@@ -142,3 +144,43 @@ test('a verified primary window wins over a window without the API', async ({ pa
   await expect(circle(second)).toBeVisible();
   await expect(circle(page)).toHaveCount(0);
 });
+
+test('the circle opens the registry launcher: search, app menu and info do not close it early', async ({ page }) => {
+  await page.goto('/desktop/');
+  await circle(page).click();
+  const search = launcher(page).getByRole('searchbox', { name: 'Search apps' });
+  await search.fill('notes');
+  await expect(launcher(page).getByRole('list', { name: 'Results' }).getByRole('button')).toHaveText(['Project notes']);
+  // Escape clears the search first, then closes and refocuses the circle.
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(launcher(page)).toBeVisible();
+  // The app menu and App info close on Escape without closing the launcher.
+  const settings = launcher(page).getByRole('list', { name: 'All apps' }).getByRole('button', { name: 'Settings', exact: true });
+  await settings.click({ button: 'right' });
+  const menu = launcher(page).getByRole('menu', { name: 'Actions for Settings' });
+  await expect(menu).toBeInViewport();
+  const box = (await menu.boundingBox())!, item = (await settings.boundingBox())!;
+  // Placed at the pointer, not offset by the centred panel.
+  expect(Math.abs(box.x - (item.x + item.width / 2))).toBeLessThan(item.width);
+  await menu.getByRole('menuitem', { name: 'App info' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
+  await expect(launcher(page)).toBeVisible();
+  await search.focus();
+  await page.keyboard.press('Escape');
+  await expect(launcher(page)).toBeHidden();
+  await expect(circle(page)).toBeFocused();
+});
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`the open circle launcher has no axe violations (${theme})`, async ({ page }) => {
+    await page.addInitScript(t => localStorage.setItem('ember:prefs', JSON.stringify({ theme: t })), theme);
+    await page.goto('/desktop/');
+    await circle(page).click();
+    await expect(launcher(page).getByRole('button', { name: 'Authentik', exact: true })).toBeVisible();
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(results.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  });
+}

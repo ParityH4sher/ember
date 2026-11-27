@@ -1,9 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Icon from '../ui/Icon.svelte';
-  import { prefs } from '../prefs.svelte';
-  import { appRegistry } from '../apps/registry';
-  import { browserOpeners, launchApp, type Openers } from '../apps/launch';
+  import { resolvedTheme } from '../theme.svelte';
+  import { browserOpeners, launchById, type Openers } from '../apps/launch';
   import { widgetRegistry } from './registry';
   import { addPlacement, boardLayout, changePlacement, removePlacement } from './layout';
   import WidgetFrame from './WidgetFrame.svelte';
@@ -25,22 +24,8 @@
   let adding = $state(false), status = $state('');
   let addButton = $state<HTMLButtonElement>(), board = $state<HTMLElement>();
 
-  // The resolved theme for WidgetContext.theme.
-  let systemDark = $state(true);
-  $effect(() => {
-    const query = matchMedia('(prefers-color-scheme: dark)');
-    const update = () => { systemDark = query.matches; };
-    update();
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  });
-  let theme = $derived<'light' | 'dark'>(prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme);
-
-  async function launch(appId: string): Promise<boolean> {
-    const app = appRegistry.get(appId);
-    if (!app) { console.warn(`[ember] No app "${appId}" is registered.`); return false; }
-    return launchApp(app, openers);
-  }
+  let theme = $derived(resolvedTheme());
+  const launch = (appId: string) => launchById(appId, openers);
   const context = (instanceId: string): WidgetContext => ({ instanceId, displayId, theme, launch, displays });
 
   async function add(widgetId: string, name: string) {

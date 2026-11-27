@@ -175,6 +175,6 @@ Other windows of the same browser pick up changes through the `storage` event.
 
 `apps/frontends/web/tests/unit/widgets.spec.ts` registers a dummy widget that
 nothing else in Ember knows about. It covers validation, lifecycle hooks, size
-clamping and layout changes. `tests/ui/launcher.spec.ts` configures, resizes,
+clamping and layout changes. `tests/ui/launcher-widget.spec.ts` configures, resizes,
 removes and adds back the launcher on the real board. It also covers a
 placement whose widget is not installed.

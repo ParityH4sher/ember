@@ -1,12 +1,19 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import Icon from '../ui/Icon.svelte';
   import UserMenu from './UserMenu.svelte';
   import LauncherCircle from '../desktop/LauncherCircle.svelte';
   import { auth, signIn } from '../session.svelte';
   import { prefs } from '../prefs.svelte';
+  import { resolvedTheme } from '../theme.svelte';
   import { visibleSections } from './nav';
+  import LauncherPanel from '../launcher/LauncherPanel.svelte';
+  import { defaultLauncherConfig, type LauncherConfig } from '../launcher/config';
+  import { ariaShortcut, parseShortcut } from '../launcher/keyboard';
+  import { browserOpeners, launchById, type Openers } from '../apps/launch';
+  import type { WidgetContext } from '../widgets/types';
 
   let { children }: { children: Snippet } = $props();
 
@@ -15,6 +22,18 @@
   // The circle belongs to the desktop surface; the shortcut works everywhere.
   let desktop = $derived(page.url.pathname === '/desktop/');
   const current = (href: string) => href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+
+  // The app-wide launcher: the circle (on the desktop surface) and the
+  // shortcut (everywhere) open the same launcher UI as the launcher widget,
+  // reading the same app registry. Its tab choice lasts for the session.
+  let circle = $state<LauncherCircle>();
+  let shortcut = $derived(prefs.launcherShortcut ? parseShortcut(prefs.launcherShortcut) : null);
+  let launcherConfig = $state<LauncherConfig>({ ...defaultLauncherConfig });
+  const openers: Openers = { ...browserOpeners, openInternal: path => goto(path) };
+  let context = $derived<WidgetContext>({
+    instanceId: 'shell', displayId: 'main', theme: resolvedTheme(), launch: appId => launchById(appId, openers)
+  });
+
   // Navigating closes the drawer on narrow screens.
   $effect(() => { void page.url.pathname; drawer = false; launcher = false; });
 </script>
@@ -51,17 +70,9 @@
   </main>
 </div>
 
-<LauncherCircle enabled={desktop && prefs.launcherCircle} bind:open={launcher}>
-  <h2 class="launcher-title">Launcher</h2>
-  {#each sections as section}
-    <h3 class="launcher-section">{section.label}</h3>
-    <ul class="launcher-grid">
-      {#each section.items as item}
-        <li><a href={item.href} aria-current={current(item.href) ? 'page' : undefined}>
-          <Icon name={item.icon} size={24} /> {item.label}</a></li>
-      {/each}
-    </ul>
-  {/each}
+<LauncherCircle bind:this={circle} enabled={desktop && prefs.launcherCircle} {shortcut} bind:open={launcher}>
+  <LauncherPanel config={launcherConfig} setConfig={change => Object.assign(launcherConfig, change)} {context}
+    shortcut={shortcut ? ariaShortcut(shortcut) : undefined} onclose={() => circle?.close()} onlaunch={() => (launcher = false)} />
 </LauncherCircle>
 
 <style>
@@ -98,14 +109,6 @@
     padding: .7rem 1rem; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn)
   }
   .expired p { margin: 0; flex: 1 1 20rem }
-  .launcher-title { margin: 0 0 .5rem; font-size: 1.1rem }
-  .launcher-section { margin: .8rem 0 .3rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
-  .launcher-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .4rem }
-  .launcher-grid a {
-    display: grid; justify-items: center; gap: .3rem; padding: .7rem .4rem; border-radius: .6rem;
-    color: inherit; text-decoration: none; text-align: center; font-size: .9rem
-  }
-  .launcher-grid a:hover, .launcher-grid a[aria-current] { background: var(--surface-2) }
   @media (max-width: 52rem) {
     .shell { grid-template: "top" auto "main" 1fr / minmax(0, 1fr) }
     .menu-button { display: inline-flex }
