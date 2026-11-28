@@ -346,9 +346,12 @@ paths:
       summary: Agents available for project chat
       description: >-
         Chat runs are off unless the operator supplies an agents configuration
-        file (EMBER_AGENTS_CONFIG_FILE) naming the sandbox router. The list has
-        the agents in that file followed by the enabled agents admins added
-        under /v1/admin/ai/agents. It never includes provider endpoints or keys.
+        file (EMBER_AGENTS_CONFIG_FILE) naming the sandbox router or harness
+        workers. The list has the agents in that file followed by the enabled
+        agents admins added under /v1/admin/ai/agents. Each item's mode says
+        whether the agent runs once per message (turn) or is a long-lived
+        harness session (session, ADR 015). It never includes provider
+        endpoints, worker addresses or keys.
       responses:
         "401":
           $ref: "#/components/responses/Unauthenticated"
@@ -591,9 +594,12 @@ paths:
       operationId: getProjectChat
       summary: Load one chat with all its messages
       description: >-
-        Poll this while an agent message is pending. A pending message whose run
-        is no longer in progress, for example after an API restart, is returned
-        as failed with an interruption error.
+        Reload this on the chat's events (see /events), or poll it while an
+        agent message is pending. When the API restarted during a session
+        run, this asks the worker: an idle session's answer is recovered, and
+        a busy session's run is tracked again (running true). Any other
+        pending message whose run is no longer in progress is returned as
+        failed with an interruption error.
       responses:
         "401":
           $ref: "#/components/responses/Unauthenticated"
@@ -604,7 +610,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Chat"
+                $ref: "#/components/schemas/ChatView"
         "404":
           description: "Project or chat not found (project_not_found, chat_not_found)"
           content:
@@ -617,13 +623,23 @@ paths:
       - $ref: "#/components/parameters/ChatId"
     post:
       operationId: sendProjectChatMessage
-      summary: Send a message and start one sandboxed agent run
+      summary: Send a message to the chat's agent
       description: >-
-        Saves the message and a pending agent message, then returns at once.
-        The API runs the chat's agent once in the sandbox router with the
-        conversation (oldest messages are left out when it would exceed the
-        router's 32 KiB input limit) and replaces the pending message with the
-        answer or a failure. Poll GET /v1/projects/{projectId}/chats/{chatId}
+        Turn agents: saves the message and a pending agent message, then
+        returns at once. The API runs the chat's agent once in the sandbox
+        router with the conversation (oldest messages are left out when it
+        would exceed the router's 32 KiB input limit) and replaces the pending
+        message with the answer or a failure.
+
+
+        Session agents (ADR 015): with no active run, saves the message and a
+        pending agent message, opens the chat's harness session and prompts
+        it. With an active run, saves only the message and steers the run
+        with it (no chat_busy). When the run ends, the agent text it produced
+        replaces the pending message, or a fixed failure message does.
+
+
+        Follow GET /events, or poll GET /v1/projects/{projectId}/chats/{chatId},
         until no message is pending. Nothing is saved when the request is
         refused.
       requestBody:
@@ -644,11 +660,11 @@ paths:
         "403":
           $ref: "#/components/responses/CrossOriginRequest"
         "202":
-          description: Message saved and agent run started
+          description: Message saved and agent run started or steered
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Chat"
+                $ref: "#/components/schemas/ChatView"
         "400":
           description: "Empty or invalid message (invalid_message)"
           content:
@@ -662,7 +678,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: "This chat already has a run in progress (chat_busy)"
+          description: "This turn agent's chat already has a run in progress (chat_busy)"
           content:
             application/json:
               schema:
@@ -676,7 +692,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "429":
-          description: "Another chat is using the agent runner (agent_busy); retry later"
+          description: >-
+            Another chat is using the agent runner, or the session agent's
+            worker has 4 active runs (agent_busy); retry later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The session agent's worker did not accept the message (worker_unavailable); nothing was saved"
           content:
             application/json:
               schema:
@@ -685,6 +709,190 @@ paths:
           description: >-
             Chat runs are off on this instance (agents_unavailable), or the
             identity provider is unreachable (identity_provider_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}/events:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+    get:
+      operationId: streamProjectChatEvents
+      summary: Live events of one chat (server-sent events)
+      description: >-
+        A text/event-stream response. The first event is
+        `data: {"type":"connected"}`; every later event is
+        `data: {"type": <type>, "delta"?: <text>}` for this chat only, with
+        types text.delta, tool.called, tool.succeeded, tool.failed,
+        run.started, run.succeeded, run.failed, run.interrupted,
+        permission.asked, permission.replied and resync. Turn agents' chats
+        only get run.started and the run end events. A comment line
+        (`: keepalive`) follows every 25 seconds. When the worker's stream
+        fails, the API sends resync and keeps the connection. Reload the chat
+        and its permissions on connected, resync and every event except
+        text.delta; run end events arrive after the transcript is written.
+        Events are not durable: a reconnecting client reloads instead of
+        replaying.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "200":
+          description: The event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: "Project or chat not found (project_not_found, chat_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: >-
+            Chat runs are off, the chat's agent is no longer offered or the API
+            is stopping (agents_unavailable), or the identity provider is
+            unreachable (identity_provider_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}/interrupt:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+    post:
+      operationId: interruptProjectChat
+      summary: Stop the chat's active run
+      description: >-
+        Session agents: asks the worker to stop the session's run; the
+        run.interrupted event follows when the transcript is updated. Turn
+        agents: cancels the run, which stops its container.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "200":
+          description: Whether a run was stopped
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [interrupted]
+                properties:
+                  interrupted: {type: boolean}
+        "404":
+          description: "Project or chat not found (project_not_found, chat_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The worker did not answer (worker_unavailable)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Chat runs are off or the chat's agent is no longer offered (agents_unavailable)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}/permissions:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+    get:
+      operationId: listProjectChatPermissions
+      summary: Tool calls of the chat's agent that wait for a decision
+      description: Always empty for turn agents.
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "200":
+          description: Open permission requests
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [permissions]
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatPermission"
+        "404":
+          description: "Project or chat not found (project_not_found, chat_not_found)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The worker did not answer (worker_unavailable)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Chat runs are off or the chat's agent is no longer offered (agents_unavailable)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/projects/{projectId}/chats/{chatId}/permissions/{permissionId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChatId"
+      - name: permissionId
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,128}$'}
+    post:
+      operationId: replyProjectChatPermission
+      summary: Allow a tool call once, or reject it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: {type: string, enum: [once, reject]}
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/CrossOriginRequest"
+        "204": {description: Decision passed to the agent}
+        "400":
+          description: "Missing or unknown decision (invalid_decision)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >-
+            Project, chat or permission request not found (project_not_found,
+            chat_not_found, permission_not_found); turn agents have none
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The worker did not answer (worker_unavailable)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "Chat runs are off or the chat's agent is no longer offered (agents_unavailable)"
           content:
             application/json:
               schema:
@@ -1292,12 +1500,18 @@ components:
           type: string
           pattern: '^[a-z][a-z0-9-]{0,62}$'
           description: >-
-            The agent's ID: its sandbox router policy name for agents from the
-            operator's agents file, or the ID an admin chose under
-            /v1/admin/ai/agents.
+            The agent's ID: its sandbox router policy name for turn agents from
+            the operator's agents file, the operator's name for a session agent,
+            or the ID an admin chose under /v1/admin/ai/agents.
         name:
           type: string
           description: Display name chosen by the operator or an admin.
+        mode:
+          type: string
+          enum: [turn, session]
+          description: >-
+            turn: one sandboxed run per message. session: a long-lived harness
+            session with steering, permissions and live events (ADR 015).
         harness:
           type: string
           description: Set for agents an admin added; for example claude-code or codex.
@@ -1452,6 +1666,53 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChatMessage"
+    ChatView:
+      type: object
+      additionalProperties: false
+      required: [schema, id, title, agent, created, updated, messages, running]
+      description: A chat as GET and POST messages return it, with its run state.
+      properties:
+        schema:
+          type: string
+          const: ember.chat/v1
+        id:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+        title:
+          type: string
+        agent:
+          type: string
+          description: ID of the agent this chat runs.
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        mode:
+          type: string
+          enum: [turn, session]
+          description: The agent's mode; absent when the agent is no longer offered.
+        running:
+          type: boolean
+          description: Whether a run of this chat is in progress.
+    ChatPermission:
+      type: object
+      additionalProperties: false
+      required: [id, action, resources]
+      properties:
+        id: {type: string}
+        action:
+          type: string
+          description: What the agent wants to do, as the harness names it (for example bash or edit).
+        resources:
+          type: array
+          items: {type: string}
+          description: What the action applies to, such as a command or path.
     ChatMessage:
       type: object
       additionalProperties: false
@@ -1465,7 +1726,10 @@ components:
           enum: [user, agent]
         content:
           type: string
-          description: Message text. Agent answers are plain text or Markdown; render them as text.
+          description: >-
+            Message text. Agent answers are plain text or Markdown; render them
+            as text. User messages that steered a session run follow the
+            pending agent message they steered.
         status:
           type: string
           enum: [pending, completed, failed]
@@ -1475,7 +1739,7 @@ components:
           description: User-facing reason, present when status is failed.
         run:
           type: string
-          description: Sandbox router run ID, for the operator's router log.
+          description: Sandbox router run ID, for the operator's router log (turn agents only).
         created:
           type: string
           format: date-time

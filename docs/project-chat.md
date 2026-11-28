@@ -6,10 +6,17 @@ sidebar_position: 7
 # Project chat with a sandboxed agent
 
 Project chat lets a user open a chat inside a project in the Notes app, send a
-message, and read an agent's answer. Each message runs the chat's agent
-**once** in the [sandbox router](https://github.com/ParityH4sher/ember/tree/main/services/sandbox-router) with the
-conversation so far. The exchange is saved in the project as
-`chats/<chat-id>.json`.
+message, and read an agent's answer. The exchange is saved in the project as
+`chats/<chat-id>.json`. An agent runs in one of two modes
+([ADR 015](decisions/015-harness-sessions.md)):
+
+- A **turn agent** runs **once** per message in the
+  [sandbox router](https://github.com/ParityH4sher/ember/tree/main/services/sandbox-router)
+  with the conversation so far (`ember.chat-turn/v1`).
+- A **session agent** is a long-lived session in an agent harness (OpenCode)
+  on a **worker**. The harness keeps the history, runs tools, asks for
+  permissions and streams its progress; Ember keeps sign-in, project scoping
+  and a copy of the transcript. Messages sent while it works steer the run.
 
 The design, its limits and the remaining phases are in the
 [implementation plan](planning/project-chat.md). Enabling it for real users is
@@ -19,10 +26,12 @@ an open decision: [DEC-009](planning/human-decisions.md#dec-009---agent-chat-fro
 
 | Works | Not yet |
 | --- | --- |
-| Chats per project, listed in the Notes app, deep links with `?project=…&chat=…` | Streaming; the browser polls every 1.5 s |
-| One agent run per message in the router, `trusted` (rootless Podman) or `isolated` (Kata) | Model access from the sandbox: agents run with `--network=none` |
-| Conversation history in each run, oldest messages left out above 32 KiB | Project notes or files inside the sandbox |
-| Transcripts as plain JSON files in the project | Durable run records, recovery of a run after an API restart |
+| Chats per project, listed in the Notes app, deep links with `?project=…&chat=…` | Streaming for turn agents (only their start and end are events) |
+| Streaming for session agents: live text, tool and permission events over SSE (`…/events`) | Model access for turn agents: they run with `--network=none` |
+| Session agents: steering, interrupt, tool permissions, history kept by the harness | Project notes or files inside the sandbox or the worker (P10) |
+| One agent run per message in the router, `trusted` (rootless Podman) or `isolated` (Kata) | Durable run records; events are not stored (P12) |
+| Conversation history in each turn run, oldest messages left out above 32 KiB | Recovery of a turn run after an API restart |
+| Transcripts as plain JSON files in the project; a session run's answer is recovered after an API restart | |
 | Fixed, user-safe error messages; the router run ID is kept for the operator | Per-user agents, message authors, project-scoped roles |
 | An offline fixture agent for testing the whole path | The `isolated` profile in the Ansible deployment |
 | The Compose deployment with a host router (`deploy/compose.agents.yaml`, Ansible `ember_agents_enabled`) | |
@@ -78,13 +87,76 @@ existing transcripts stay readable, and **New chat** is hidden.
 
 | Field | Meaning |
 | --- | --- |
-| `routerSocket` | Absolute path of the router's Unix socket. The API process must be able to connect to it. |
-| `agents` | 0–16 entries of `{"id", "name"}` (with none, admins add agents in the web app; see [Agents and models](#agents-and-models-for-admins)). `id` is the agent's name in the router policy (`^[a-z][a-z0-9-]{0,62}$`); `name` is what users see. |
+| `routerSocket` | Absolute path of the router's Unix socket. The API process must be able to connect to it. Required only when a turn agent is listed; without it, turn runs (including admin-added agents) fail with "The sandbox router is not reachable." |
+| `workers` | Optional, at most 4 harness workers: `{"id", "harness": "opencode", "url", "passwordFile", "directory"}`. `url` is `http://host[:port]` with no path, query or user info. `passwordFile` holds the worker's password (at least 32 bytes; surrounding whitespace is ignored) and is read at startup. `directory` is the session working directory inside the worker (default `/workspace`). |
+| `agents` | 0–16 entries of `{"id", "name", "worker"?}` (with none, admins add agents in the web app; see [Agents and models](#agents-and-models-for-admins)). Without `worker`, `id` is the agent's name in the router policy (`^[a-z][a-z0-9-]{0,62}$`). With `worker` (one of the worker IDs) it is a session agent. `name` is what users see. |
 | `allowWithoutSignIn` | Optional, default `false`. While [sign-in](authentication.md) is off, the API **refuses to start** with an agents file unless this is `true`. Anyone who can reach the API can then start containers on the router's host, so use it only on loopback. |
 
 The API cannot read the router's policy. A listed `id` that the router does not
 know produces "This agent is not registered with the sandbox router." when a
 message is sent.
+
+A file with a session agent:
+
+```json
+{
+  "routerSocket": "/run/ember-router/router.sock",
+  "workers": [
+    {"id": "opencode", "harness": "opencode", "url": "http://opencode-worker:4096",
+     "passwordFile": "/run/secrets/opencode_password", "directory": "/workspace"}
+  ],
+  "agents": [
+    {"id": "chat-fixture", "name": "Offline fixture"},
+    {"id": "coder", "name": "Coder", "worker": "opencode"}
+  ]
+}
+```
+
+## Session agents
+
+A chat with a session agent is the OpenCode session `ses_ember_<chat-id>` on
+its worker. The API holds one event stream per worker and talks to the worker
+with its password (basic auth, user `opencode`); browsers never reach the
+worker. Every chat of a worker shares its workspace: chats are separated by
+session, not by an OS boundary. Which model a worker uses is set in its
+`opencode.json`, routed through the model gateway.
+
+| Route (under `/v1/projects/{projectId}/chats/{chatId}`) | Session agent | Turn agent |
+| --- | --- | --- |
+| `POST …/messages` | No active run: saves the message and a pending answer, opens the session and prompts it. Active run: saves the message and steers the run. | One router run, as before |
+| `GET …/events` | Server-sent events (below) | `run.started` and the run's end only |
+| `POST …/interrupt` | Stops the session's run: `{"interrupted": bool}` | Cancels the run |
+| `GET …/permissions` | `{"permissions": [{"id", "action", "resources"}]}` | Always empty |
+| `POST …/permissions/{permissionId}` | `{"decision": "once"\|"reject"}`, 204 | 404 `permission_not_found` |
+
+`GET /v1/agents` items and chat responses (`GET` chat, the 202 of
+`POST …/messages`) carry `"mode": "session"|"turn"`; chat responses also carry
+`"running"`.
+
+**Events.** The stream starts with `data: {"type":"connected"}`, then sends
+`data: {"type": …, "delta"?: …}` for this chat only: `text.delta`,
+`tool.called`, `tool.succeeded`, `tool.failed`, `run.started`,
+`run.succeeded`, `run.failed`, `run.interrupted`, `permission.asked`,
+`permission.replied`. A `: keepalive` comment follows every 25 s. When the
+worker's stream fails, the API sends `resync`, keeps the browser connection,
+resubscribes with backoff (1 s up to 30 s) and sends `resync` again once it is
+back. Clients reload the chat and its permissions on `connected`, `resync` and
+every event except `text.delta`. Run end events are sent after the transcript
+is written.
+
+**Transcript copy.** When the worker reports that a run ended, the API reads
+the session's newest 200 messages and writes the agent text produced since the
+run's first message (at most 64 KiB) into the pending answer, or a fixed
+failure message ("The agent run failed…", "The run was interrupted…"). Steer
+messages follow the pending answer in the transcript. If the API restarts
+while a run is active, the next `GET` of the chat asks the worker: an idle
+session's answer is recovered; a busy session's run is tracked again.
+
+**Limits.** At most 4 active session runs per worker (`429 agent_busy`
+beyond); steering is not limited. A message, including a steer, is limited to
+16 KiB. After 15 minutes the API interrupts the run and records "The agent did
+not answer within the time limit." Worker errors are logged without their
+body and shown as `502 worker_unavailable`.
 
 ## Turn on chat in a deployment
 
@@ -168,8 +240,7 @@ stdout. For chat that document is an `ember.chat-turn/v1` envelope:
   "schema": "ember.chat-turn/v1",
   "project": {"id": "desk", "name": "Desk organizer"},
   "chat": {"id": "3f9c2a7b1d4e8f60", "title": "Which filament for the bracket?"},
-  "model": {"id": "sonnet", "name": "Claude Sonnet", "providerKind": "anthropic",
-            "upstream": "claude-sonnet-…", "local": false},
+  "model": {"id": "sonnet", "name": "Claude Sonnet"},
   "messages": [
     {"role": "user", "content": "Which filament for the bracket?"},
     {"role": "agent", "content": "PETG, because…"},
@@ -184,8 +255,9 @@ stdout. For chat that document is an `ember.chat-turn/v1` envelope:
   left out.
 - `omittedMessages` says how many older messages were left out to fit the
   router's 32 KiB input limit.
-- `model` is present only for an agent an admin added with a model. It is the
-  alias to request from the model gateway, never an endpoint or a key.
+- `model` is present only for an agent an admin added with a model. `id` is
+  the model name to request from the model gateway, never an endpoint or a
+  key.
 - Print the answer as plain text or Markdown, at most 64 KiB, and exit 0. Ember
   trims it, shows it as text (not HTML) and treats an empty answer as a
   failure.
@@ -230,13 +302,19 @@ models (DEC-007) is also still to do.
 
 - **New chat** starts a chat with the selected agent. The first message
   becomes its title.
-- One message per chat can be in progress. The API runs one agent at a time,
-  so a send while another chat is running is refused with "the agent runner is
-  busy" and nothing is saved; send it again when the other answer arrives.
+- With a turn agent, one message per chat can be in progress. The router runs
+  one agent at a time, so a send while another chat is running is refused
+  with "the agent runner is busy" and nothing is saved; send it again when the
+  other answer arrives.
+- With a session agent, a message sent while the agent works steers it, and
+  **Stop** interrupts it. A tool call that needs approval waits until someone
+  allows it once or rejects it.
 - A message is limited to 16 KiB and a chat to 1 MiB. Start a new chat when a
   chat is full.
-- If the API restarts while an agent is working, that answer is shown as "The
-  run was interrupted before the agent answered." Send the message again.
+- If the API restarts while a turn agent is working, that answer is shown as
+  "The run was interrupted before the agent answered." Send the message again.
+  A session agent keeps working in its worker, and its answer appears when
+  the chat is next opened.
 - Failure messages name the cause without runtime details. The operator can
   match the **Run** ID with the router's log.
 
@@ -247,6 +325,8 @@ as the project's notes. They contain whatever users type and whatever agents
 answer. Deleting a project keeps its files, including chats, as it does for
 notes. Remove `chats/<id>.json` by hand to delete a chat.
 
-The API logs each run's chat ID, agent, router run ID, outcome and duration,
-never message text. Once agents can reach a model (P9), message text will go
-to that model's provider under the rules of DEC-007.
+The API logs each run's chat ID, agent or worker, router run ID, outcome and
+duration, never message text or text deltas. A session agent's worker keeps
+its own copy of the conversation, and its model provider receives the message
+text under the rules of DEC-007; the same applies to turn agents once they can
+reach a model (P9).
