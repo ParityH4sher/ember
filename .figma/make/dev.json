@@ -1,4 +1,16 @@
 {
-  "installOn": ["website/package.json", "website/package-lock.json"],
-  "restartOn": ["website/docusaurus.config.js", "website/sidebars.js"]
+  "installOn": [
+    "website/package.json",
+    "website/package-lock.json",
+    "apps/frontends/web/package.json",
+    "apps/frontends/web/package-lock.json",
+    "apps/api/go.mod",
+    "apps/api/go.sum"
+  ],
+  "restartOn": [
+    "website/docusaurus.config.js",
+    "website/sidebars.js",
+    "apps/api/**/*.go",
+    "apps/api/version.txt"
+  ]
 }

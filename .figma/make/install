@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-exec npm --prefix website ci
+npm --prefix website ci
+npm --prefix apps/frontends/web ci
+cd apps/api
+exec go mod download
