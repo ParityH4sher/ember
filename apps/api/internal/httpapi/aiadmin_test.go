@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,7 +29,13 @@ func aiFixture(t *testing.T, gateway *aicatalog.Gateway) (admin, user http.Handl
 	if err := vaults.Create(projects.Project{ID: "desk", Name: "Desk organizer"}); err != nil {
 		t.Fatal(err)
 	}
-	config, err := agents.ParseConfig([]byte(testAgents))
+	secret := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(secret, []byte(strings.Repeat("p", 40)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := agents.ParseConfig([]byte(`{"routerSocket":"/run/router.sock",
+		"workers":[{"id":"opencode","harness":"opencode","url":"http://opencode-worker:4096","passwordFile":"` + secret + `"}],
+		"agents":[{"id":"chat-fixture","name":"Offline fixture"},{"id":"other","name":"Other"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +46,7 @@ func aiFixture(t *testing.T, gateway *aicatalog.Gateway) (admin, user http.Handl
 		t.Fatal(err)
 	}
 	runner = &fakeRunner{calls: make(chan *runCall, 4)}
-	runs := NewChatRuns(config, runner, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runs := NewChatRuns(config, runner, slog.New(slog.NewTextHandler(io.Discard, nil)), WithHarness("opencode", newFakeHarness()))
 	t.Cleanup(func() { runs.Close(2 * time.Second) })
 	api := NewDeploymentHandler("test", vaults, nil, nil, WithChatRuns(runs), WithAICatalog(catalog),
 		WithModelGateway(gateway), WithWorkers([]WorkerInfo{{ID: "opencode", Harness: "opencode"}}))
@@ -131,8 +139,23 @@ func TestAIAdminConfiguresAgentForChat(t *testing.T) {
 	listed := decode[struct {
 		Agents []agentInfo `json:"agents"`
 	}](t, send(user, "GET", "/v1/agents", ""))
-	if len(listed.Agents) != 3 || listed.Agents[2] != (agentInfo{ID: "claude", Name: "Claude Code", Harness: "claude-code", Model: "Claude Sonnet"}) {
+	if len(listed.Agents) != 3 || listed.Agents[2] != (agentInfo{ID: "claude", Name: "Claude Code", Mode: modeTurn, Harness: "claude-code", Model: "Claude Sonnet"}) {
 		t.Fatalf("agents = %+v", listed.Agents)
+	}
+
+	// An enabled catalog agent with a worker is a session agent.
+	must(t, send(admin, "PUT", "/v1/admin/ai/agents/coder", `{"name":"Coder","harness":"opencode","worker":"opencode","enabled":true}`), 200)
+	listed = decode[struct {
+		Agents []agentInfo `json:"agents"`
+	}](t, send(user, "GET", "/v1/agents", ""))
+	if len(listed.Agents) != 4 || listed.Agents[3] != (agentInfo{ID: "coder", Name: "Coder", Mode: modeSession, Harness: "opencode"}) {
+		t.Fatalf("agents with session agent = %+v", listed.Agents)
+	}
+	coderChat := decode[projects.Chat](t, send(user, "POST", "/v1/projects/desk/chats", `{"agent":"coder"}`))
+	sent := send(user, "POST", "/v1/projects/desk/chats/"+coderChat.ID+"/messages", `{"content":"Review the plan"}`)
+	must(t, sent, 202)
+	if !strings.Contains(sent.Body.String(), `"mode":"session"`) {
+		t.Fatalf("catalog session chat = %s", sent.Body)
 	}
 
 	created := send(user, "POST", "/v1/projects/desk/chats", `{"agent":"claude"}`)

@@ -83,6 +83,86 @@ func TestLoadConfig(t *testing.T) {
 	}
 }
 
+func writeSecret(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestWorkersConfig(t *testing.T) {
+	secret := strings.Repeat("s", 32)
+	password := writeSecret(t, secret+"\n")
+	doc := func(workers, agents string) string {
+		return `{"workers":[` + workers + `],"agents":[` + agents + `]}`
+	}
+	worker := func(id, url, file string) string {
+		return fmt.Sprintf(`{"id":%q,"harness":"opencode","url":%q,"passwordFile":%q}`, id, url, file)
+	}
+	good := worker("opencode", "http://opencode-worker:4096", password)
+	// Session agents alone need no router socket.
+	c, err := ParseConfig([]byte(doc(good, `{"id":"coder","name":"Coder","worker":"opencode"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, ok := c.Worker("opencode")
+	if !ok || w.Password() != secret || w.Directory != "/workspace" || w.URL != "http://opencode-worker:4096" {
+		t.Fatalf("worker = %+v, %v", w, ok)
+	}
+	if ids := c.WorkerIDs(); len(ids) != 1 || ids[0] != "opencode" {
+		t.Fatalf("WorkerIDs = %v", ids)
+	}
+	if a, _ := c.Agent("coder"); a.Worker != "opencode" {
+		t.Fatalf("agent = %+v", a)
+	}
+	var none *Config
+	if ids := none.WorkerIDs(); len(ids) != 0 {
+		t.Fatal("nil config has workers")
+	}
+	if _, ok := none.Worker("opencode"); ok {
+		t.Fatal("nil config found a worker")
+	}
+	withDir := strings.Replace(good, `"harness"`, `"directory":"/srv/work","harness"`, 1)
+	if c, err := ParseConfig([]byte(doc(withDir, ""))); err != nil || c.Workers[0].Directory != "/srv/work" {
+		t.Fatalf("directory = %v, %v", c, err)
+	}
+	// The password never leaves through JSON.
+	if b, _ := json.Marshal(c); strings.Contains(string(b), secret) {
+		t.Fatal("password marshalled")
+	}
+
+	five := []string{}
+	for i := range 5 {
+		five = append(five, worker(fmt.Sprintf("w%d", i), "http://w:1", password))
+	}
+	for name, d := range map[string]string{
+		"router agent without socket": doc(good, `{"id":"fixture","name":"F"}`),
+		"unknown worker":              doc(good, `{"id":"coder","name":"Coder","worker":"other"}`),
+		"too many workers":            doc(strings.Join(five, ","), ""),
+		"duplicate worker":            doc(good+","+good, ""),
+		"bad worker id":               doc(worker("Open_Code", "http://w:1", password), ""),
+		"other harness":               doc(strings.Replace(good, `"opencode","url"`, `"codex","url"`, 1), ""),
+		"https":                       doc(worker("w", "https://w:1", password), ""),
+		"path":                        doc(worker("w", "http://w:1/api", password), ""),
+		"trailing slash":              doc(worker("w", "http://w:1/", password), ""),
+		"query":                       doc(worker("w", "http://w:1?x=1", password), ""),
+		"user info":                   doc(worker("w", "http://u:p@w:1", password), ""),
+		"no host":                     doc(worker("w", "http://:1", password), ""),
+		"relative directory":          doc(strings.Replace(good, `"harness"`, `"directory":"work","harness"`, 1), ""),
+		"missing password file":       doc(worker("w", "http://w:1", "/nonexistent/secret"), ""),
+		"no password file":            doc(worker("w", "http://w:1", ""), ""),
+		"short password":              doc(worker("w", "http://w:1", writeSecret(t, strings.Repeat("s", 31)+"\n")), ""),
+		"two-line password":           doc(worker("w", "http://w:1", writeSecret(t, secret+"\n"+secret)), ""),
+		"unknown worker field":        doc(strings.Replace(good, `"harness"`, `"token":"x","harness"`, 1), ""),
+	} {
+		if _, err := ParseConfig([]byte(d)); err == nil {
+			t.Errorf("%s: accepted %s", name, d)
+		}
+	}
+}
+
 func turnWith(contents ...string) Turn {
 	t := Turn{Project: ProjectRef{ID: "desk", Name: "Desk"}, Chat: ChatRef{ID: "0123456789abcdef", Title: "Hi"}}
 	for i, c := range contents {

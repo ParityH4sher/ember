@@ -1,7 +1,6 @@
-package main
+package opencode
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ParityH4sher/ember/apps/api/internal/harness"
 )
 
 // Opt-in protocol check: a fresh foreground OpenCode, no inherited accounts,
@@ -41,7 +42,8 @@ func TestOpenCodeProtocol(t *testing.T) {
 		}
 		const answer = "Fixture review complete."
 		if !request.Stream {
-			output(w, map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": answer}, "finish_reason": "stop"}}})
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": answer}, "finish_reason": "stop"}}})
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -58,7 +60,7 @@ func TestOpenCodeProtocol(t *testing.T) {
 	}))
 	defer model.Close()
 	home := t.TempDir()
-	config, err := os.ReadFile("../../../../services/ai-worker/opencode/worker.json")
+	config, err := os.ReadFile("../../../../../services/ai-worker/opencode/worker.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +85,9 @@ func TestOpenCodeProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { cancel(); _ = cmd.Wait() }()
-	p := &panel{upstream: "http://" + address, operator: "test-operator", password: password, client: &http.Client{}}
+	c := New("http://"+address, password)
 	for {
-		if _, err := p.call(ctx, "GET", "/api/info", nil, nil); err == nil {
+		if err := c.call(ctx, "GET", "/api/info", nil, nil); err == nil {
 			break
 		}
 		select {
@@ -94,54 +96,55 @@ func TestOpenCodeProtocol(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	// No tools and no host workspace. Connect must resume this session.
-	body, _ := json.Marshal(map[string]any{"id": sessionID, "location": map[string]string{"directory": home}, "permissions": []any{map[string]string{"action": "*", "resource": "*", "effect": "deny"}}})
-	if _, err := p.call(ctx, "POST", "/api/session", strings.NewReader(string(body)), nil); err != nil {
+	const sessionID = "ses_ember_0123456789abcdef"
+	// No tools and no host workspace. Open must resume this session.
+	create := map[string]any{"id": sessionID, "location": map[string]string{"directory": home}, "permissions": []any{map[string]string{"action": "*", "resource": "*", "effect": "deny"}}}
+	if err := c.call(ctx, "POST", "/api/session", create, nil); err != nil {
 		t.Fatal(err)
 	}
-	h := p.handler()
-	post := func(path, body string, want int) string {
-		t.Helper()
-		w := visit(h, "POST", path, body, true, true)
-		if w.Code != want {
-			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
-		}
-		return w.Body.String()
+	s := harness.Session{ID: sessionID, Directory: home}
+	if err := c.Open(ctx, s); err != nil {
+		t.Fatal(err)
 	}
-	post("connect", "", 204)
-	s := httptest.NewServer(h)
-	defer s.Close()
-	req, _ := http.NewRequestWithContext(ctx, "GET", s.URL+prefix+"events", nil)
-	req.SetBasicAuth("operator", "test-operator")
-	stream, err := s.Client().Do(req)
+	events, err := c.Subscribe(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Body.Close()
-	sc := bufio.NewScanner(stream.Body)
-	wait := func(marker string) {
+	wait := func(want string) {
 		t.Helper()
-		for sc.Scan() {
-			if strings.Contains(sc.Text(), marker) {
+		for e := range events {
+			if e.Session == sessionID && e.Type == want {
 				return
 			}
 		}
-		t.Fatalf("stream ended waiting for %q: %v", marker, sc.Err())
+		t.Fatalf("stream ended waiting for %q", want)
 	}
-	wait("connected")
-	post("steer", `{"text":"Review the fixture"}`, 202)
-	wait("session.text.delta")
-	wait("session.execution.succeeded")
-	post("connect", "", 204)
-	history := visit(h, "GET", "messages", "", true, false).Body.String()
-	promptAt, answerAt := strings.Index(history, "Review the fixture"), strings.Index(history, "Fixture review complete.")
-	if promptAt < 0 || answerAt <= promptAt {
-		t.Fatalf("unexpected history: %s", history)
+	if err := c.Prompt(ctx, sessionID, "Review the fixture"); err != nil {
+		t.Fatal(err)
 	}
-	post("steer", `{"text":"wait-for-stop"}`, 202)
-	wait("session.text.delta")
-	post("steer", `{"text":"Focus on errors"}`, 202)
-	if result := post("interrupt", "", 200); !strings.Contains(result, `"interrupted":true`) {
-		t.Fatal(result)
+	wait(harness.TextDelta)
+	wait(harness.RunSucceeded)
+	if err := c.Open(ctx, s); err != nil {
+		t.Fatal(err)
 	}
+	history, err := c.Messages(ctx, sessionID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := fmt.Sprint(history)
+	promptAt, answerAt := strings.Index(text, "Review the fixture"), strings.Index(text, "Fixture review complete.")
+	if promptAt < 0 || answerAt <= promptAt || history[len(history)-1].Role != harness.RoleRun {
+		t.Fatalf("unexpected history: %v", history)
+	}
+	if err := c.Prompt(ctx, sessionID, "wait-for-stop"); err != nil {
+		t.Fatal(err)
+	}
+	wait(harness.TextDelta)
+	if err := c.Prompt(ctx, sessionID, "Focus on errors"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := c.Interrupt(ctx, sessionID); err != nil || !ok {
+		t.Fatalf("interrupt = %v, %v", ok, err)
+	}
+	wait(harness.RunInterrupted)
 }
