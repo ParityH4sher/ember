@@ -226,7 +226,8 @@ Authentik.
 
 ## DEC-007 - Model routing, privacy and spending
 
-Status: LiteLLM selected for the first pilot; production adoption pending
+Status: LiteLLM selected for the first pilot; an optional LiteLLM overlay owns
+provider keys since [ADR 015](../decisions/015-harness-sessions.md) ([guide](../models.md)); production adoption pending
 Priority: High
 
 ### Context

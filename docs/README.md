@@ -45,6 +45,8 @@ devcontainer and hot-reload setup.
   system options for keeping windows above others.
 - [Sign-in (OIDC)](authentication.md): optional OpenID Connect sign-in, its
   configuration file, and provider setup.
+- [Models and workers](models.md): configuring providers in the LiteLLM model
+  gateway, offering its models in Ember, and running an OpenCode worker.
 - [API reference](api-reference.md): hosted OpenAPI contract and interactive
   Swagger UI.
 - [POC implementation handoff](https://github.com/ParityH4sher/ember/blob/main/EMBER_POC_IMPLEMENTATION_BRIEF.md): detailed

@@ -5,7 +5,12 @@ sidebar_position: 3
 
 # Ember AI gateway architecture and evaluation
 
-- **Status:** Proposed architecture; gateway selection is not final.
+- **Status:** Proposed architecture; gateway selection is not final. Since
+  [ADR 015](../decisions/015-harness-sessions.md), an optional LiteLLM overlay
+  (`deploy/compose.models.yaml`, [guide](../models.md)) is the only place
+  provider endpoints and keys are configured; Ember lists its models and stores
+  no keys. Per-user routing, budgets per user and MCP access are not
+  implemented, and the overlay is not yet qualified on the Pi.
 - **Purpose:** Define the boundaries, requirements, and evaluation plan for
   controlled model and tool access.
 
