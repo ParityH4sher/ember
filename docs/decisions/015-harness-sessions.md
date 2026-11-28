@@ -177,3 +177,24 @@ session agents: 15 minutes, after which the API interrupts the session.
   providers in LiteLLM. This removes key custody from the API.
 - Live events depend on the API holding one upstream stream per worker; events
   are not durable (P12 still owns durable run records).
+
+## Implementation notes (2026-11-28)
+
+- `POST …/interrupt` only asks the worker to stop. The worker's
+  `run.interrupted` event finishes the run, so a late event cannot close the
+  next run. Deadline expiry interrupts, waits 10 s for that event, then records
+  a timeout.
+- Interrupted, timed-out and failed session runs keep no partial text; they
+  are `failed` with a fixed message. Steer messages are stored after the
+  pending agent message.
+- Additional errors: `502 worker_unavailable` (nothing saved when the first
+  prompt fails), `400 invalid_decision`, `503 agents_unavailable` on `/events`.
+- The OpenAPI contract adds a `ChatView` schema for the `mode`/`running` fields.
+- LiteLLM virtual keys need its database, so `deploy/compose.models.yaml` also
+  runs PostgreSQL for LiteLLM only.
+- Migrating a v1 catalog relabels agents with harness `opencode` (router
+  images under v1) as `custom`.
+- Unverified against a real OpenCode 2.3.2: the end-of-run `idle` history
+  marker, `limit=200` on message history, and `sessionID` in `permission.*`
+  events. `go test ./internal/harness/opencode` with `OPENCODE_TEST_BINARY`
+  checks them.
