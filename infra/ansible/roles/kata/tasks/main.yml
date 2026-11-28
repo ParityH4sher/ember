@@ -1,0 +1,109 @@
+---
+- name: Map the host architecture to a Kata release
+  ansible.builtin.set_fact:
+    kata_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] | default('') }}"
+
+- name: Require a supported architecture
+  ansible.builtin.assert:
+    that:
+      - kata_arch in kata_checksums
+    fail_msg: >-
+      Kata Containers releases are installed for amd64 and arm64 only, not
+      {{ ansible_facts['architecture'] }}.
+    quiet: true
+
+- name: Look for hardware virtualization
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: kata_kvm
+
+- name: Require /dev/kvm
+  ansible.builtin.assert:
+    that:
+      - kata_kvm.stat.exists and kata_kvm.stat.ischr
+    fail_msg: >-
+      This host has no /dev/kvm, so Kata cannot start VMs. Enable hardware
+      virtualization (or nested virtualization for a VM), or, only for a trial
+      on a host without users' data, set ember_opencode_runtime to runc and
+      ember_opencode_allow_runc to true.
+    quiet: true
+
+# The release is a zstd-compressed tarball.
+- name: Install zstd
+  ansible.builtin.apt:
+    name: zstd
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Read the installed Kata version
+  ansible.builtin.slurp:
+    src: /opt/kata/.ember-kata-version
+  register: kata_installed
+  failed_when: false
+
+- name: Install Kata Containers {{ kata_version }}
+  when: (kata_installed.content | default('') | b64decode | trim) != kata_version ~ ' ' ~ kata_arch
+  block:
+    - name: Download the Kata release
+      ansible.builtin.get_url:
+        url: "https://github.com/kata-containers/kata-containers/releases/download/{{ kata_version }}/kata-static-{{ kata_version }}-{{ kata_arch }}.tar.zst"
+        dest: "/var/cache/kata-static-{{ kata_version }}-{{ kata_arch }}.tar.zst"
+        checksum: "{{ kata_checksums[kata_arch] }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # A new version replaces the old tree, so no stale files remain.
+    - name: Remove a previous Kata installation
+      ansible.builtin.file:
+        path: /opt/kata
+        state: absent
+
+    # The tarball holds ./opt/kata/...
+    - name: Unpack Kata into /opt/kata
+      ansible.builtin.command:
+        argv:
+          - tar
+          - --zstd
+          - --extract
+          - --no-same-owner
+          - --file
+          - "/var/cache/kata-static-{{ kata_version }}-{{ kata_arch }}.tar.zst"
+          - --directory
+          - /
+          - ./opt/kata
+        creates: /opt/kata/bin/containerd-shim-kata-v2
+
+    - name: Record the installed Kata version
+      ansible.builtin.copy:
+        content: "{{ kata_version }} {{ kata_arch }}\n"
+        dest: /opt/kata/.ember-kata-version
+        owner: root
+        group: root
+        mode: "0644"
+
+# Docker resolves the runtime name io.containerd.kata.v2 to the shim binary
+# containerd-shim-kata-v2 on PATH; no daemon.json entry is needed.
+- name: Put the Kata shim and runtime on PATH
+  ansible.builtin.file:
+    src: "/opt/kata/bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    owner: root
+    group: root
+  loop:
+    - containerd-shim-kata-v2
+    - kata-runtime
+
+# Fails early, with Kata's own explanation, when the CPU, kernel modules or
+# VMM cannot run guests on this host.
+- name: Check that this host can run Kata guests
+  ansible.builtin.command:
+    argv: [/opt/kata/bin/kata-runtime, check, --no-network-checks]
+  register: kata_check
+  changed_when: false
+  check_mode: false
+  failed_when: kata_check.rc != 0
+  # In check mode on a new host nothing is installed yet.
+  when: not ansible_check_mode or kata_installed.content is defined

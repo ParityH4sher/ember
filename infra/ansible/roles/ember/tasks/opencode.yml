@@ -1,0 +1,46 @@
+---
+# The OpenCode worker for session agents (deploy/compose.opencode.yaml,
+# ADR 015). Included from main.yml while ember_opencode_enabled is true,
+# before models.yml.
+
+- name: Require sign-in, the gateway and a model for the OpenCode worker
+  ansible.builtin.assert:
+    that:
+      - ember_oidc_enabled | bool
+      - ember_models_enabled | bool
+      - ember_opencode_model in (ember_litellm_models | map(attribute='model_name'))
+      - ember_opencode_agent_id is match('^[a-z][a-z0-9-]{0,62}$')
+      - ember_opencode_agent_id not in (sandbox_router_chat_agents | default([]) | map(attribute='id'))
+      - ember_opencode_agent_name | length >= 1 and ember_opencode_agent_name | length <= 80
+      - ember_opencode_budget | string is match('^([0-9]+([.][0-9]+)?)?$')
+    fail_msg: >-
+      ember_opencode_enabled needs ember_oidc_enabled, ember_models_enabled and
+      ember_opencode_model set to a model_name of ember_litellm_models. The
+      agent id matches ^[a-z][a-z0-9-]{0,62}$ and differs from the router's
+      agents; the name has 1 to 80 characters; the budget is a number of US
+      dollars or empty.
+    quiet: true
+
+- name: Require a VM boundary for the OpenCode worker
+  ansible.builtin.assert:
+    that:
+      - >-
+        ember_opencode_runtime == 'io.containerd.kata.v2'
+        or (ember_opencode_runtime == 'runc' and ember_opencode_allow_runc | bool)
+    fail_msg: >-
+      ember_opencode_runtime is io.containerd.kata.v2 (roles/kata). runc
+      shares the host kernel with agent tools and generated code; it also
+      needs ember_opencode_allow_runc, for trials on hosts without users' data.
+    quiet: true
+
+# The API and the worker both run as UID 65532 and read it. Generated once.
+- name: Install the worker password
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}\n"
+    dest: "{{ ember_config_dir }}/opencode-password"
+    owner: "65532"
+    group: "65532"
+    mode: "0400"
+    force: false
+  register: ember_opencode_password
+  no_log: true

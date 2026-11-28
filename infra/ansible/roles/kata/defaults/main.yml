@@ -1,0 +1,17 @@
+---
+# Kata Containers for the OpenCode worker (deploy/compose.opencode.yaml,
+# ADR 015). site.yml runs this role only while ember_opencode_enabled is true
+# and ember_opencode_runtime is io.containerd.kata.v2. Each worker container
+# then runs in its own lightweight VM with its own guest kernel, so agent tools
+# and generated code do not share the host kernel.
+#
+# The host needs hardware virtualization exposed as /dev/kvm (a Raspberry Pi 4
+# or 5 on Ubuntu has it; most cloud VMs need nested virtualization enabled).
+
+# The official static release, installed under /opt/kata. Checked against the
+# GitHub release asset digests on 2026-11-28; update version and both
+# checksums together.
+kata_version: 4.3.1
+kata_checksums:
+  amd64: sha256:1463a2b86845f4d3d8e87f2f764ec59856fc0fee3520967a79ade32762be2e97
+  arm64: sha256:2c5bf7cde334ad5307d482f45cceda496f91c9b6b96f5278c47f4f4eac1bbae6

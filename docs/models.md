@@ -27,8 +27,8 @@ admin page ── lists models ──> Ember API ── GET /v1/models ──> L
 
 Status: the overlays are new and have not yet been qualified on the target
 Raspberry Pi; DEC-007's per-user routing, budgets and MCP access are not
-implemented. The Ansible `ember` role does not add these overlays yet; see
-[Ansible](#ansible).
+implemented. With Ansible, the `ember` and `kata` roles do all of the steps
+below; see [Ansible](#ansible).
 
 ## Before you start
 
@@ -217,17 +217,52 @@ bearer token). Replacing `LITELLM_MASTER_KEY` needs `$boot up -d litellm`.
 
 ## Ansible
 
-The Ansible `ember` role does not yet deploy these overlays: it would also
-have to create the secret files above. Until it does, run steps 1–5 on the
-host and add the `-f deploy/compose.models.yaml` (and
-`-f deploy/compose.opencode.yaml`) files to the role's Compose file list by
-hand, or use `install.sh` on that host.
+`playbooks/site.yml` deploys both overlays from inventory variables (defaults
+and comments in `infra/ansible/roles/ember/defaults/main.yml`). Put provider
+keys in a Vault file:
+
+```yaml
+ember_models_enabled: true
+ember_litellm_models:
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+ember_litellm_provider_keys:
+  ANTHROPIC_API_KEY: "{{ vault_anthropic_api_key }}"
+
+ember_opencode_enabled: true          # needs sign-in and the gateway
+ember_opencode_model: claude-sonnet   # a model_name above
+ember_opencode_budget: "20"           # US dollars per 30 days, optional
+```
+
+The roles then:
+
+- write `/opt/ember/config/litellm/config.yaml` and the secrets directory,
+  generating the master key and database password once;
+- start LiteLLM and create two virtual keys once: `model-gateway-key` for the
+  API (lists models) and `opencode-gateway-key` for the worker (its model and
+  budget only), both in `/opt/ember/config`;
+- generate the worker password, add the worker and a `coder` session agent
+  (`ember_opencode_agent_id`, `ember_opencode_agent_name`) to `agents.json`;
+- install Kata Containers (`roles/kata`, a pinned static release in
+  `/opt/kata`) and check that the host can start Kata guests. The host needs
+  `/dev/kvm`. `ember_opencode_runtime: runc` with
+  `ember_opencode_allow_runc: true` skips Kata, for trials on a host without
+  users' data only;
+- restart LiteLLM, the API or the worker when their configuration or secrets
+  change.
+
+To replace a virtual key, delete its file on the host and run the playbook
+again, then delete the old key in LiteLLM as above. Keys are tied to the
+`litellm-db` volume: if that volume is lost, delete both key files too.
 
 ## Data and backups
 
 | Where | Holds | Back up? |
 | --- | --- | --- |
-| `/etc/ember/litellm/secrets` | Master key, database password, provider keys | As secrets |
+| `/etc/ember/litellm/secrets` (Ansible: `/opt/ember/config/litellm/secrets`) | Master key, database password, provider keys | As secrets |
+| Ansible: `/opt/ember/config/{model-gateway-key,opencode-gateway-key,opencode-password}` | Virtual keys and the worker password | As secrets |
 | `litellm-db` volume | Virtual keys (hashed), budgets and spend | Yes |
 | `ai` volume (`catalog.json`) | Offered models and agents; no keys | Yes |
 | Worker tmpfs | Sessions and workspace files | Lost on recreate |

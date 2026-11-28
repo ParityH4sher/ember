@@ -123,6 +123,15 @@ context from `apps/frontends/web/`. Each run removes containers of services that
 `deploy/compose.yaml` no longer defines, such as the `home` and `notes`
 frontends of earlier versions, and the staged `apps/frontends/home/`.
 
+## Model gateway and OpenCode worker
+
+`ember_models_enabled` runs LiteLLM and its PostgreSQL next to Ember
+(`deploy/compose.models.yaml`); `ember_opencode_enabled` adds an OpenCode
+worker for session agents (`deploy/compose.opencode.yaml`) and the `kata` role,
+which installs Kata Containers so the worker runs in its own VM. Both are off
+by default. Variables, Vault keys and what the roles generate:
+[models guide](../../docs/models.md#ansible).
+
 ## Shared service stacks
 
 Shared services such as Authentik, and the public ingress (Traefik and
