@@ -1,54 +1,41 @@
 import { test, expect, signedIn, grace } from './mock-api';
 
-// Admin → Agents & models: providers, models and agents for project chat.
+// Admin → Agents & models (ADR 015): gateway models offered under a display
+// name, and the agents that use them. Providers and keys live in the gateway.
 
-test('an admin connects Ollama and Claude and adds an agent', async ({ page, api }) => {
+test('an admin offers a gateway model and adds a router agent', async ({ page, api }) => {
   signedIn(api, grace, 'admin');
+  api.ai.gateway = ['claude-sonnet', 'qwen3-8b'];
   await page.goto('/admin/ai/');
   await expect(page.getByRole('heading', { name: 'Agents & models' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /provider/i })).toHaveCount(0);
 
-  // A hosted provider: the key goes to the API and is never shown again.
-  const providers = page.locator('#providers');
-  await providers.getByLabel('Name').fill('Claude');
-  await providers.getByLabel('Kind').selectOption('anthropic');
-  await providers.getByLabel('API key').fill('sk-ant-test-secret');
-  await providers.getByRole('button', { name: 'Add provider' }).click();
-  await expect(providers.getByRole('status')).toHaveText('Saved Claude.');
-  const claude = providers.getByRole('row', { name: /Claude claude/ });
-  await expect(claude).toContainText('https://api.anthropic.com/v1');
-  await expect(claude).toContainText('key set');
-  await expect(page.locator('body')).not.toContainText('sk-ant-test-secret');
-  expect(api.ai.providers[0]).toMatchObject({ id: 'claude', kind: 'anthropic', apiKey: 'sk-ant-test-secret' });
-
-  // A LAN Ollama: fetch its models and add one with a click.
-  await providers.getByLabel('Name').fill('Home Ollama');
-  await providers.getByLabel('Kind').selectOption('ollama');
-  await providers.getByLabel('Base URL').fill('http://ollama.lan:11434');
-  await providers.getByRole('button', { name: 'Add provider' }).click();
-  const ollama = providers.getByRole('row', { name: /Home Ollama/ });
-  await expect(ollama).toContainText('local');
-  await ollama.getByRole('button', { name: 'Fetch models' }).click();
-  await expect(providers.getByText('Home Ollama offers 2 models.')).toBeVisible();
-  await providers.getByRole('button', { name: 'qwen3:8b +' }).click();
-
+  // The gateway's models, offered with a click and a display name.
+  const gateway = page.locator('#gateway');
+  await gateway.getByRole('button', { name: 'Offer qwen3-8b' }).click();
   const models = page.locator('#models');
-  await expect(models.getByLabel('Provider', { exact: true })).toHaveValue('home-ollama');
-  await expect(models.getByLabel("Provider's model ID")).toHaveValue('qwen3:8b');
-  await models.getByLabel('Name').fill('Qwen 3 8B');
+  await expect(models.getByLabel('Gateway model')).toHaveValue('qwen3-8b');
+  await expect(models.getByLabel('Display name')).toBeFocused();
+  await models.getByLabel('Display name').fill('Qwen 3 8B');
   await models.getByRole('button', { name: 'Add model' }).click();
-  await expect(models.getByRole('row', { name: /Qwen 3 8B/ })).toContainText('Home Ollama');
-  await expect(providers.getByRole('button', { name: 'qwen3:8b ✓' })).toBeDisabled();
+  await expect(models.getByRole('status')).toHaveText('Saved Qwen 3 8B.');
+  await expect(models.getByRole('row', { name: /Qwen 3 8B/ })).toContainText('qwen3-8b');
+  await expect(gateway.getByRole('button', { name: 'qwen3-8b, already offered' })).toBeDisabled();
+  expect(api.ai.models).toEqual([{ id: 'qwen3-8b', name: 'Qwen 3 8B' }]);
 
-  // An agent: the Codex harness image, using that model.
+  // A router agent: the Codex harness image, using that model.
   const agents = page.locator('#agents');
   await expect(agents).toContainText('Fixture agent');
   await agents.getByLabel('Name').fill('Codex');
   await agents.getByLabel('Harness').selectOption('codex');
+  await expect(agents.getByLabel('Worker')).toHaveCount(0);
   await agents.getByLabel('Router agent').fill('codex-cli');
   await agents.getByLabel(/Qwen 3 8B/).check();
   await agents.getByRole('button', { name: 'Add agent' }).click();
   await expect(agents.getByRole('row', { name: /Codex codex/ })).toContainText('Qwen 3 8B');
+  await expect(agents.getByRole('row', { name: /Codex codex/ })).toContainText('router agent codex-cli');
   expect(api.ai.agents[0]).toMatchObject({ id: 'codex', harness: 'codex', routerAgent: 'codex-cli', models: ['qwen3-8b'], enabled: true });
+  expect(api.ai.agents[0]).not.toHaveProperty('worker');
 
   // The model is in use, so it cannot be deleted yet.
   page.once('dialog', d => d.accept());
@@ -56,23 +43,39 @@ test('an admin connects Ollama and Claude and adds an agent', async ({ page, api
   await expect(models.getByRole('status')).toContainText('an agent uses this model');
 });
 
-test('editing a provider keeps its key unless replaced or removed', async ({ page, api }) => {
+test('an OpenCode agent runs on a worker instead of a router agent', async ({ page, api }) => {
   signedIn(api, grace, 'admin');
-  api.ai.providers.push({ id: 'openai', name: 'OpenAI', kind: 'openai', baseURL: 'https://api.openai.com/v1', local: false, apiKey: 'sk-old' });
+  api.ai.workers = [{ id: 'opencode', harness: 'opencode' }];
   await page.goto('/admin/ai/');
-  const providers = page.locator('#providers');
-  await providers.getByRole('row', { name: /OpenAI/ }).getByRole('button', { name: 'Edit' }).click();
-  await expect(providers.getByLabel('API key')).toHaveValue('');
-  await expect(providers.getByLabel('API key')).toHaveAttribute('placeholder', 'Stored; type to replace');
-  await providers.getByLabel('Name').fill('OpenAI (Codex)');
-  await providers.getByRole('button', { name: 'Save provider' }).click();
-  await expect(providers.getByRole('row', { name: /OpenAI \(Codex\)/ })).toContainText('key set');
-  expect(api.ai.providers[0].apiKey).toBe('sk-old');
+  const agents = page.locator('#agents');
+  await agents.getByLabel('Name').fill('Coder');
+  await agents.getByLabel('Harness').selectOption('opencode');
+  await expect(agents.getByLabel('Router agent')).toHaveCount(0);
+  await agents.getByLabel('Worker').selectOption('opencode');
+  await agents.getByRole('button', { name: 'Add agent' }).click();
+  await expect(agents.getByRole('row', { name: /Coder coder/ })).toContainText('worker opencode');
+  expect(api.ai.agents[0]).toMatchObject({ id: 'coder', harness: 'opencode', worker: 'opencode' });
+  expect(api.ai.agents[0]).not.toHaveProperty('routerAgent');
 
-  await providers.getByRole('row', { name: /OpenAI/ }).getByRole('button', { name: 'Edit' }).click();
-  await providers.getByLabel('Remove the stored key').check();
-  await providers.getByRole('button', { name: 'Save provider' }).click();
-  await expect(providers.getByRole('row', { name: /OpenAI/ })).toContainText('needs key');
+  // Editing keeps the worker selected.
+  await agents.getByRole('row', { name: /Coder coder/ }).getByRole('button', { name: 'Edit' }).click();
+  await expect(agents.getByLabel('Worker')).toHaveValue('opencode');
+});
+
+test('without a gateway the page says where providers are configured', async ({ page, api }) => {
+  signedIn(api, grace, 'admin');
+  await page.goto('/admin/ai/');
+  const gateway = page.locator('#gateway');
+  await expect(gateway).toContainText('configured in the LiteLLM model gateway');
+  await expect(gateway).toContainText('docs/models.md');
+  expect(api.calls).not.toContain('GET /v1/admin/ai/gateway/models');
+
+  // A model can still be added by its gateway name.
+  const models = page.locator('#models');
+  await models.getByLabel('Gateway model').fill('claude-sonnet');
+  await models.getByLabel('Display name').fill('Claude Sonnet');
+  await models.getByRole('button', { name: 'Add model' }).click();
+  await expect(models.getByRole('row', { name: /Claude Sonnet/ })).toContainText('claude-sonnet');
 });
 
 test('people without the admin role cannot open Agents & models', async ({ page, api }) => {

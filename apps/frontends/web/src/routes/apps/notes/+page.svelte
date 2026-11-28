@@ -3,7 +3,7 @@
   import { beforeNavigate, replaceState } from '$app/navigation';
   import {
     createChat, createProject, getChat, listAgents, listChats, listProjects, loadNotes, saveNote,
-    sendMessage, SignInRequired,
+    SignInRequired,
     type Agent, type Chat, type ChatSummary, type Notes, type Project
   } from '../../../lib/api';
   import { blocks } from '../../../lib/links';
@@ -13,6 +13,7 @@
   import DisplaySettings from '../../../lib/DisplaySettings.svelte';
   import NotePreview from '../../../lib/NotePreview.svelte';
   import PinnedNote from '../../../lib/PinnedNote.svelte';
+  import ProjectChat from '../../../lib/ProjectChat.svelte';
   import { pinSupported, pinToTop } from '../../../lib/pin';
 
   let projects = $state<Project[]>([]), project = $state(''), path = $state('');
@@ -20,19 +21,17 @@
   let editing = $state(false), busy = $state(false), offline = $state(false);
   let draft = $state(''), filter = $state(''), message = $state(''), retry = $state(false);
   // The layout signs people in first; this turns true when the session ends while
-  // the page is open (the shell then offers to sign in again) and stops polling.
+  // the page is open (the shell then offers to sign in again).
   let signedOut = $state(false);
   let dirty = $derived(editing && draft !== (notes[path] ?? ''));
   let paths = $derived(Object.keys(notes).sort());
   let references = $derived(paths.filter(p => p !== path &&
     [...blocks(notes[p] ?? '', p, notes)].some(([,parts]) => parts.some(t => t.path === path))));
 
-  // Project chat: each message runs the chat's agent once in the sandbox router.
+  // Project chat (lib/ProjectChat.svelte): a turn agent runs once per message
+  // in the sandbox router; a session agent is one harness session per chat.
   let agents = $state.raw<Agent[]>([]), agentsEnabled = $state(false), agentChoice = $state('');
   let chats = $state.raw<ChatSummary[]>([]), chat = $state.raw<Chat | null>(null);
-  let chatDraft = $state(''), poll = $state(0);
-  let waiting = $derived(chat?.messages.some(m => m.status === 'pending') ?? false);
-  const agentName = (id: string) => agents.find(a => a.id === id)?.name ?? id;
 
   const query = (dest: string) => '?' + new URLSearchParams({project, note: dest});
   const chatQuery = (id: string) => '?' + new URLSearchParams({project, chat: id});
@@ -92,7 +91,7 @@
   }
   const summary = (c: Chat): ChatSummary => ({
     id: c.id, title: c.title, agent: c.agent, created: c.created, updated: c.updated,
-    messageCount: c.messages.length, pending: c.messages.some(m => m.status === 'pending')
+    messageCount: c.messages.length, pending: c.running ?? c.messages.some(m => m.status === 'pending')
   });
   function showChat(c: Chat) {
     chat = c;
@@ -120,7 +119,6 @@
     project = id;
     notes = Object.assign(Object.create(null), data.notes);
     filter = '';
-    chatDraft = '';
     await loadChats(id);
     if (chatId && chats.some(c => c.id === chatId)) await openChat(chatId);
     else openNote(dest);
@@ -176,38 +174,9 @@
   async function newChat() {
     if (!leave()) return;
     const created = await createChat(project, agentChoice || agents[0].id);
-    chatDraft = '';
     showChat(created);
     await openChat(created.id);
   }
-  async function send() {
-    const text = chatDraft.trim();
-    if (!chat || !text || waiting) return;
-    // The API saves the message and answers at once; the agent's reply arrives by polling.
-    showChat(await sendMessage(project, chat.id, text));
-    chatDraft = '';
-    message = '';
-  }
-  function composerKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); action(send); }
-  }
-  // Poll while the agent is answering. A new chat object re-arms the timer.
-  $effect(() => {
-    if (!chat || !waiting) return;
-    const proj = project, id = chat.id;
-    void poll;
-    const timer = setTimeout(async () => {
-      try {
-        const fresh = await getChat(proj, id);
-        if (project === proj && chat?.id === id) showChat(fresh);
-      } catch (error) {
-        if (error instanceof SignInRequired) { signedOut = true; return; }
-        message = 'Waiting for the agent; reconnecting…';
-        poll++;
-      }
-    }, 1500);
-    return () => clearTimeout(timer);
-  });
   onMount(() => {
     const network = () => { offline = !navigator.onLine; };
     network();
@@ -272,29 +241,11 @@
     <p id="message" role="status">{message}</p>
     {#if retry}<button id="retry" onclick={() => action(load)}>Retry connection</button>{/if}
     {#if project && chat}
-      <div class="toolbar">
-        <strong id="chat-title">{chat.title || 'New chat'}</strong>
-        <span class="agent">with {agentName(chat.agent)}</span>
-      </div>
-      <ol id="transcript" aria-label="Chat messages" aria-live="polite">
-        {#each chat.messages as m (m.id)}
-          <li class={['msg', m.role, m.status]}>
-            <span class="who">{m.role === 'user' ? 'You' : agentName(chat.agent)}</span>
-            {#if m.status === 'pending'}<p class="working">Agent is working…</p>
-            {:else if m.status === 'failed'}<p class="error">{m.error}{#if m.run} <small>Run {m.run}</small>{/if}</p>
-            {:else}<p class="text">{m.content}</p>{/if}
-          </li>
-        {:else}<li class="hint">Ask {agentName(chat.agent)} something about this project. Each message runs the agent once in a sandbox, without network access or project files.</li>{/each}
-      </ol>
-      {#if agentsEnabled && agents.some(a => a.id === chat?.agent)}
-        <form id="composer" onsubmit={(e) => { e.preventDefault(); action(send); }}>
-          <textarea id="chat-input" aria-label="Message" placeholder="Message the agent… (Ctrl+Enter sends)"
-            bind:value={chatDraft} onkeydown={composerKey}></textarea>
-          <button id="send" disabled={waiting || !chatDraft.trim()}>{waiting ? 'Waiting for answer…' : 'Send'}</button>
-        </form>
-      {:else}
-        <p class="hint">This chat's agent is not available on this Ember instance. The transcript stays readable.</p>
-      {/if}
+      <!-- Keyed so that a draft or live text never carries over to another chat. -->
+      {#key `${project}/${chat.id}`}
+        <ProjectChat {project} {chat} {agents} available={agentsEnabled && agents.some(a => a.id === chat?.agent)}
+          onupdate={showChat} onsignedout={() => { signedOut = true; }} />
+      {/key}
     {:else if project}
       <div class="toolbar">
         <strong id="path">{path}</strong>
@@ -334,16 +285,6 @@
   :global(article#preview pre) {overflow:auto;background:var(--surface-2);padding:.5rem}
   #message:empty {display:none}
   @media(max-width:62rem){.notes{grid-template-columns:1fr}}
-  /* Project chat */
-  .hint,.toolbar .agent,.working,.msg .who {color:var(--muted)}
   nav a[aria-current] {font-weight:650}
-  #transcript {list-style:none;padding:0;margin:1rem 0;display:flex;flex-direction:column;gap:.6rem}
-  .msg {padding:.5rem .7rem;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);max-width:52rem}
-  .msg.user {background:var(--surface-2);align-self:flex-end}
-  .msg .who {display:block;font-size:.8rem;font-weight:650}
-  .msg p {margin:.2rem 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
-  .msg .error {color:var(--danger)}
-  .working {font-style:italic}
-  #composer {display:flex;flex-direction:column;align-items:flex-end}
-  #chat-input {height:6rem}
+  .hint {color:var(--muted)}
 </style>

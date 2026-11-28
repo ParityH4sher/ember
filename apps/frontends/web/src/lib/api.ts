@@ -22,35 +22,49 @@ export interface PluginOperation {
   inputSchema: Schema; outputSchema: Schema
 }
 export interface PluginCatalog { pluginVersion: string; apiVersion: string; operations: PluginOperation[] }
-/** harness and model are set for agents an admin added on the Agents & models page. */
-export interface Agent { id: string; name: string; harness?: string; model?: string }
+/**
+ * harness and model are set for agents an admin added on the Agents & models
+ * page. mode (ADR 015): a session agent is one long-lived harness session per
+ * chat that can be steered while it runs; a turn agent runs once per message.
+ */
+export type AgentMode = 'session' | 'turn';
+export interface Agent { id: string; name: string; harness?: string; model?: string; mode?: AgentMode }
 export interface AgentList { enabled: boolean; agents: Agent[] }
 
-// Agents & models (admin only). Keys are sent, never returned: a provider
-// only reports whether it has one.
-export type ProviderKind = 'anthropic' | 'openai' | 'ollama' | 'openai-compatible';
-export interface ModelProvider {
-  id: string; name: string; kind: ProviderKind; baseURL: string; local: boolean; hasAPIKey: boolean
-}
-export interface ProviderInput {
-  name: string; kind: ProviderKind; baseURL: string; local: boolean; apiKey?: string; clearApiKey?: boolean
-}
-export interface CatalogModel { id: string; name: string; provider: string; upstream: string }
+// Agents & models (admin only). Providers and their keys live in the model
+// gateway (LiteLLM, docs/models.md); the catalog only offers gateway models
+// under a display name and maps agents to them.
+/** id is the gateway's model name. */
+export interface CatalogModel { id: string; name: string }
+/** A session worker from the operator's agents file. */
+export interface AIWorker { id: string; harness: string }
+/** Harness opencode runs on a worker; the other harnesses are router agents. */
 export interface CatalogAgent {
-  id: string; name: string; harness: string; routerAgent: string; models: string[]; defaultModel?: string; enabled: boolean
+  id: string; name: string; harness: string; routerAgent?: string; worker?: string;
+  models: string[]; defaultModel?: string; enabled: boolean
 }
 export interface AICatalog {
-  persisted: boolean; chatEnabled: boolean; providerKinds: ProviderKind[]; harnesses: string[];
-  operatorAgents: Agent[]; providers: ModelProvider[]; models: CatalogModel[]; agents: CatalogAgent[]
+  persisted: boolean; chatEnabled: boolean; harnesses: string[]; workers: AIWorker[];
+  gateway: { configured: boolean }; operatorAgents: Agent[]; models: CatalogModel[]; agents: CatalogAgent[]
 }
 export interface ChatMessage {
   id: string; role: 'user' | 'agent'; content: string; created: string;
   status?: 'pending' | 'completed' | 'failed'; error?: string; run?: string;
 }
+/** mode and running come from APIs with ADR 015; older ones omit them. */
 export interface Chat {
   schema: string; id: string; title: string; agent: string; created: string; updated: string;
-  messages: ChatMessage[];
+  messages: ChatMessage[]; mode?: AgentMode; running?: boolean;
 }
+/** A tool permission a session agent waits for. */
+export interface Permission { id: string; action: string; resources: string[] }
+export type PermissionDecision = 'once' | 'reject';
+/**
+ * One event of a chat's live stream. connected and resync come from Ember;
+ * the others are text.delta, tool.called|succeeded|failed,
+ * run.started|succeeded|failed|interrupted and permission.asked|replied.
+ */
+export interface ChatEvent { type: string; delta?: string }
 export interface ChatSummary {
   id: string; title: string; agent: string; created: string; updated: string;
   messageCount: number; pending: boolean;
@@ -138,22 +152,17 @@ export async function invokeOperation(path: string, input: Record<string, unknow
 }
 
 const ai = '/api/v1/admin/ai';
-const aiItem = (kind: 'providers' | 'models' | 'agents', id: string) => `${ai}/${kind}/${encodeURIComponent(id)}`;
+const aiItem = (kind: 'models' | 'agents', id: string) => `${ai}/${kind}/${encodeURIComponent(id)}`;
 /** Needs the admin role. */
 export async function getAICatalog(): Promise<AICatalog> {
   return (await request(ai)).json();
 }
-/** Needs the admin role. Omitting apiKey keeps the stored key unless the URL or kind changes. */
-export async function saveProvider(id: string, input: ProviderInput): Promise<ModelProvider> {
-  return (await request(aiItem('providers', id), 'PUT', input)).json();
+/** The model names the gateway offers; fails (gateway_unavailable) when it is not configured or unreachable. */
+export async function listGatewayModels(): Promise<string[]> {
+  const body: {models: {id: string}[]} = await (await request(`${ai}/gateway/models`)).json();
+  return body.models.map(m => m.id);
 }
-export async function deleteProvider(id: string): Promise<void> {
-  await request(aiItem('providers', id), 'DELETE');
-}
-/** Lists the model IDs the provider offers, fetched by the API with the stored key. */
-export async function discoverModels(id: string): Promise<string[]> {
-  return (await (await request(`${aiItem('providers', id)}/discover`, 'POST')).json()).models;
-}
+/** id is the gateway's model name. */
 export async function saveModel(id: string, model: Omit<CatalogModel, 'id'>): Promise<CatalogModel> {
   return (await request(aiItem('models', id), 'PUT', model)).json();
 }
@@ -182,9 +191,57 @@ export async function createChat(id: string, agent: string): Promise<Chat> {
 export async function getChat(id: string, chat: string): Promise<Chat> {
   return (await request(chatUrl(id, chat))).json();
 }
-/** Saves the message and starts one agent run; poll getChat for the answer. */
+/**
+ * Saves the message and starts an agent run. While a session agent runs, the
+ * message steers that run instead. The answer arrives through the event
+ * stream (openChatEvents) and getChat.
+ */
 export async function sendMessage(id: string, chat: string, content: string): Promise<Chat> {
   return (await request(`${chatUrl(id, chat)}/messages`, 'POST', { content })).json();
+}
+/** Stops the chat's active run; false when none was running. */
+export async function interruptChat(id: string, chat: string): Promise<boolean> {
+  const body: {interrupted?: unknown} = await (await request(`${chatUrl(id, chat)}/interrupt`, 'POST', {})).json();
+  return body.interrupted === true;
+}
+export async function listPermissions(id: string, chat: string): Promise<Permission[]> {
+  return (await (await request(`${chatUrl(id, chat)}/permissions`)).json()).permissions;
+}
+export async function replyPermission(id: string, chat: string, permission: string, decision: PermissionDecision): Promise<void> {
+  await request(`${chatUrl(id, chat)}/permissions/${encodeURIComponent(permission)}`, 'POST', { decision });
+}
+/**
+ * Opens the chat's event stream (same origin, so the session cookie goes
+ * along) and returns a function that closes it. The browser retries a stream
+ * that drops, but not one whose first request failed (an API restarting, a
+ * 401): that one is reopened here with a growing delay. onError reports each
+ * failure; the next connected event means the stream is back.
+ */
+export function openChatEvents(id: string, chat: string,
+  on: { event: (event: ChatEvent) => void; error: () => void }): () => void {
+  let source: EventSource | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false, delay = 3000;
+  const open = () => {
+    const current = source = new EventSource(`${chatUrl(id, chat)}/events`);
+    current.onmessage = ({ data }) => {
+      let event: unknown;
+      try { event = JSON.parse(data); } catch { return; }
+      if (!event || typeof event !== 'object' || !('type' in event) || typeof event.type !== 'string') return;
+      delay = 3000;
+      const delta = 'delta' in event && typeof event.delta === 'string' ? event.delta : undefined;
+      on.event({ type: event.type, ...(delta !== undefined && { delta }) });
+    };
+    current.onerror = () => {
+      if (closed) return;
+      on.error();
+      if (current.readyState === EventSource.CLOSED) {
+        timer = setTimeout(open, delay);
+        delay = Math.min(delay * 2, 30_000);
+      }
+    };
+  };
+  open();
+  return () => { closed = true; clearTimeout(timer); source?.close(); };
 }
 
 /** Session state, or null when it cannot be read (offline or an older API). */
