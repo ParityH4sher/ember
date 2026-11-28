@@ -3,9 +3,9 @@
 This component is not implemented. Its future responsibility is to execute a
 persisted Ember task using an agent runtime behind a replaceable interface.
 
-For an interactive single-task experiment, see the
-[OpenCode review panel](opencode/README.md). It has its own operator login,
-Compose project, and disposable worker; it is not a persisted Ember task service.
+Interactive OpenCode sessions now run behind the Ember API as session agents
+(ADR 015); see [the OpenCode worker](opencode/README.md). That worker is not a
+persisted Ember task service.
 
 ## Required boundary
 

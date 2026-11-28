@@ -42,29 +42,75 @@ if [[ -n "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
   fi
   export EMBER_REDIS_PASSWORD_FILE
 fi
-# Optional project chat; see docs/project-chat.md. The sandbox router runs on
-# the host with -client-group, and only signed-in users may start its agents.
+# Optional model gateway (LiteLLM); see docs/models.md. Provider keys live in
+# its secrets directory, never in Ember.
+if [[ -n "${EMBER_LITELLM_CONFIG_FILE:-}" ]]; then
+  if [[ "$EMBER_LITELLM_CONFIG_FILE" != /* || "${EMBER_LITELLM_SECRETS_DIR:-}" != /* || "${EMBER_MODEL_GATEWAY_KEY_FILE:-}" != /* ]]; then
+    echo "Set EMBER_LITELLM_CONFIG_FILE, EMBER_LITELLM_SECRETS_DIR and EMBER_MODEL_GATEWAY_KEY_FILE to absolute host paths." >&2
+    exit 2
+  fi
+  if [[ ! -f "$EMBER_LITELLM_CONFIG_FILE" || ! -d "$EMBER_LITELLM_SECRETS_DIR" || ! -f "$EMBER_MODEL_GATEWAY_KEY_FILE" ]]; then
+    echo "Create the LiteLLM config, its secrets directory and the API's gateway key first (docs/models.md)." >&2
+    exit 1
+  fi
+  compose+=(-f deploy/compose.models.yaml)
+fi
+# Optional project chat; see docs/project-chat.md. Only signed-in users may
+# start agents. Turn agents need the sandbox router on the host (started with
+# -client-group); session agents need an OpenCode worker (below). The router
+# overlay is left out only when a worker is configured and no router socket is.
 if [[ -n "${EMBER_AGENTS_CONFIG_FILE:-}" ]]; then
   if [[ -z "${EMBER_AUTH_CONFIG_FILE:-}" ]]; then
     echo "EMBER_AGENTS_CONFIG_FILE needs sign-in (EMBER_AUTH_CONFIG_FILE): chat runs start containers on this host." >&2
     exit 2
   fi
-  if [[ "$EMBER_AGENTS_CONFIG_FILE" != /* || "${EMBER_ROUTER_SOCKET_DIR:-}" != /* ]]; then
-    echo "Set EMBER_AGENTS_CONFIG_FILE and EMBER_ROUTER_SOCKET_DIR to absolute host paths." >&2
+  if [[ "$EMBER_AGENTS_CONFIG_FILE" != /* ]]; then
+    echo "Set EMBER_AGENTS_CONFIG_FILE to an absolute host path." >&2
     exit 2
   fi
-  if [[ ! -f "$EMBER_AGENTS_CONFIG_FILE" || ! -d "$EMBER_ROUTER_SOCKET_DIR" ]]; then
-    echo "Create the agents file and the router socket directory first (docs/project-chat.md)." >&2
+  if [[ ! -f "$EMBER_AGENTS_CONFIG_FILE" ]]; then
+    echo "Create the agents file first (docs/project-chat.md)." >&2
     exit 1
   fi
-  # The API joins the group that owns the socket directory.
-  EMBER_ROUTER_GID="${EMBER_ROUTER_GID:-$(stat -c %g -- "$EMBER_ROUTER_SOCKET_DIR")}"
-  if [[ ! "$EMBER_ROUTER_GID" =~ ^[1-9][0-9]*$ ]]; then
-    echo "EMBER_ROUTER_GID must be the router client group's numeric GID, not root's." >&2
+  if [[ -n "${EMBER_ROUTER_SOCKET_DIR:-}" || -z "${EMBER_OPENCODE_PASSWORD_FILE:-}" ]]; then
+    if [[ "${EMBER_ROUTER_SOCKET_DIR:-}" != /* ]]; then
+      echo "Set EMBER_ROUTER_SOCKET_DIR to an absolute host path." >&2
+      exit 2
+    fi
+    if [[ ! -d "$EMBER_ROUTER_SOCKET_DIR" ]]; then
+      echo "Create the router socket directory first (docs/project-chat.md)." >&2
+      exit 1
+    fi
+    # The API joins the group that owns the socket directory.
+    EMBER_ROUTER_GID="${EMBER_ROUTER_GID:-$(stat -c %g -- "$EMBER_ROUTER_SOCKET_DIR")}"
+    if [[ ! "$EMBER_ROUTER_GID" =~ ^[1-9][0-9]*$ ]]; then
+      echo "EMBER_ROUTER_GID must be the router client group's numeric GID, not root's." >&2
+      exit 2
+    fi
+    export EMBER_ROUTER_GID
+    compose+=(-f deploy/compose.agents.yaml)
+  fi
+fi
+# Optional OpenCode worker for session agents; see docs/models.md. It reaches
+# models only through the gateway, and the API drives it for signed-in users.
+if [[ -n "${EMBER_OPENCODE_PASSWORD_FILE:-}" ]]; then
+  if [[ -z "${EMBER_AGENTS_CONFIG_FILE:-}" || -z "${EMBER_LITELLM_CONFIG_FILE:-}" ]]; then
+    echo "EMBER_OPENCODE_PASSWORD_FILE needs the agents file (EMBER_AGENTS_CONFIG_FILE) and the model gateway (EMBER_LITELLM_CONFIG_FILE)." >&2
     exit 2
   fi
-  export EMBER_ROUTER_GID
-  compose+=(-f deploy/compose.agents.yaml)
+  if [[ "$EMBER_OPENCODE_PASSWORD_FILE" != /* ]]; then
+    echo "Set EMBER_OPENCODE_PASSWORD_FILE to an absolute host path." >&2
+    exit 2
+  fi
+  if [[ ! -f "$EMBER_OPENCODE_PASSWORD_FILE" ]]; then
+    echo "Create the worker password file first (docs/models.md)." >&2
+    exit 1
+  fi
+  if [[ -z "${EMBER_OPENCODE_GATEWAY_KEY:-}" || -z "${EMBER_OPENCODE_MODEL:-}" ]]; then
+    echo "Set EMBER_OPENCODE_GATEWAY_KEY (a LiteLLM virtual key) and EMBER_OPENCODE_MODEL (a gateway model name)." >&2
+    exit 2
+  fi
+  compose+=(-f deploy/compose.opencode.yaml)
 fi
 if [[ $# -eq 1 && $1 == --check ]]; then
   "${compose[@]}" config --quiet

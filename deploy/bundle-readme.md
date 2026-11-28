@@ -23,6 +23,8 @@ For Docker, use `docker compose -f deploy/compose.yaml ps`, `logs api frontend`
 with the same Compose prefix, or `docker compose -f deploy/compose.yaml down`.
 For Podman, substitute `podman compose`. With sign-in
 (`EMBER_AUTH_CONFIG_FILE`), `install.sh` also starts a Redis container for
-sign-in sessions and generates its password file; see the sign-in guide. No
-database, project data or agent runtime ships in this archive. See the [deployment guide](https://parityh4sher.github.io/ember/deployment/)
+sign-in sessions and generates its password file; see the sign-in guide. With
+`EMBER_LITELLM_CONFIG_FILE` it adds the LiteLLM model gateway, and with
+`EMBER_OPENCODE_PASSWORD_FILE` an OpenCode worker; see the models guide. No
+project data or agent runtime ships in this archive. See the [deployment guide](https://parityh4sher.github.io/ember/deployment/)
 for operational limits and the checksum procedure.

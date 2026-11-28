@@ -11,7 +11,7 @@ RUN mkdir -p /out/projects /out/ai
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/ember-api /ember-api
 COPY --from=build --chown=65532:65532 /out/projects /var/lib/ember/projects
-# Providers, models and agents admins add in the web app; holds provider keys.
+# Models and agents admins add in the web app; no keys (ADR 015).
 COPY --from=build --chown=65532:65532 /out/ai /var/lib/ember/ai
 ENV EMBER_PROJECT_ROOT=/var/lib/ember/projects
 ENV EMBER_AI_CATALOG_FILE=/var/lib/ember/ai/catalog.json
