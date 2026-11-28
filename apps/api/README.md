@@ -19,9 +19,12 @@ go build .
 - `internal/agents/`: project chat's agents file (`EMBER_AGENTS_CONFIG_FILE`),
   the `ember.chat-turn/v1` envelope and the sandbox router client
   ([project chat](../../docs/project-chat.md)).
-- `internal/aicatalog/`: model providers, models and agents that admins add in
-  the web app (`/v1/admin/ai`), saved to `EMBER_AI_CATALOG_FILE` (mode 0600; it
-  holds provider keys). Without the variable the catalog is kept in memory.
+- `internal/aicatalog/`: the models (offered from the model gateway) and agents
+  that admins add in the web app (`/v1/admin/ai`), saved to
+  `EMBER_AI_CATALOG_FILE` (no keys; a v1 file with provider keys is migrated),
+  and the gateway client (`EMBER_MODEL_GATEWAY_URL`,
+  `EMBER_MODEL_GATEWAY_KEY_FILE`; [models](../../docs/models.md)). Without the
+  catalog variable the catalog is kept in memory.
 - `internal/projectfiles/`: filesystem storage for one project’s contents, independent of HTTP project records.
 
 The API module is compiled as one service, while the `internal/` packages keep

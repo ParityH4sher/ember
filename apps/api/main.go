@@ -16,6 +16,7 @@ import (
 	"github.com/ParityH4sher/ember/apps/api/internal/agents"
 	"github.com/ParityH4sher/ember/apps/api/internal/aicatalog"
 	"github.com/ParityH4sher/ember/apps/api/internal/auth"
+	"github.com/ParityH4sher/ember/apps/api/internal/harness/opencode"
 	"github.com/ParityH4sher/ember/apps/api/internal/httpapi"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins"
 	"github.com/ParityH4sher/ember/apps/api/internal/plugins/gitea"
@@ -101,7 +102,7 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 	if err := agentsAllowed(agentsConfig, authn.Mode()); err != nil {
 		return err
 	}
-	// Admins add providers, models and agents from the web app. Without a
+	// Admins offer gateway models and add agents from the web app. Without a
 	// file, the catalog lives in memory and is lost when the API stops.
 	catalog, err := aicatalog.Open(os.Getenv("EMBER_AI_CATALOG_FILE"), func(id string) bool {
 		if agentsConfig == nil {
@@ -109,15 +110,43 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 		}
 		_, taken := agentsConfig.Agent(id)
 		return taken
+	}, func(id string) bool {
+		_, ok := agentsConfig.Worker(id)
+		return ok
 	})
 	if err != nil {
 		return err
 	}
-	options := []httpapi.Option{httpapi.WithAICatalog(catalog)}
+	if m := catalog.Migration(); m.From != "" {
+		logger.Warn("AI catalog migrated; provider settings now belong in the model gateway",
+			"from", m.From, "droppedProviders", m.DroppedProviders, "discardedAPIKeys", m.DroppedKeys, "relabelledAgents", m.Relabelled)
+	}
+	// Providers and their keys live in the model gateway (ADR 015); Ember only
+	// lists its models for the admin page.
+	gateway, err := aicatalog.LoadGateway(os.Getenv("EMBER_MODEL_GATEWAY_URL"), os.Getenv("EMBER_MODEL_GATEWAY_KEY_FILE"))
+	if err != nil {
+		return err
+	}
+	workerInfo := []httpapi.WorkerInfo{}
+	for _, id := range agentsConfig.WorkerIDs() {
+		w, _ := agentsConfig.Worker(id)
+		workerInfo = append(workerInfo, httpapi.WorkerInfo{ID: w.ID, Harness: w.Harness})
+	}
+	options := []httpapi.Option{httpapi.WithAICatalog(catalog), httpapi.WithModelGateway(gateway), httpapi.WithWorkers(workerInfo)}
 	var chatRuns *httpapi.ChatRuns
 	agentCount := 0
 	if agentsConfig != nil {
-		chatRuns = httpapi.NewChatRuns(agentsConfig, agents.NewRouter(agentsConfig.RouterSocket), logger)
+		// Without a router socket, turn runs (including admin catalog agents)
+		// fail with router_unavailable; session agents still work.
+		var runner agents.Runner
+		if agentsConfig.RouterSocket != "" {
+			runner = agents.NewRouter(agentsConfig.RouterSocket)
+		}
+		var workers []httpapi.RunOption
+		for _, w := range agentsConfig.Workers {
+			workers = append(workers, httpapi.WithHarness(w.ID, opencode.New(w.URL, w.Password())))
+		}
+		chatRuns = httpapi.NewChatRuns(agentsConfig, runner, logger, workers...)
 		options = append(options, httpapi.WithChatRuns(chatRuns))
 		agentCount = len(agentsConfig.Agents)
 	}
@@ -130,11 +159,15 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 		MaxHeaderBytes:    16 << 10,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	logger.Info("api listening", "address", listener.Addr().String(), "version", version, "auth", authn.Mode(), "sessions", authn.SessionStore(), "agents", agentCount, "adminAgents", len(catalog.EnabledAgents()), "aiCatalogPersisted", catalog.View().Persisted)
+	if chatRuns != nil {
+		srv.RegisterOnShutdown(chatRuns.EndStreams)
+	}
+	logger.Info("api listening", "address", listener.Addr().String(), "version", version, "auth", authn.Mode(), "sessions", authn.SessionStore(), "agents", agentCount, "workers", len(agentsConfig.WorkerIDs()), "adminAgents", len(catalog.EnabledAgents()), "aiCatalogPersisted", catalog.View().Persisted)
 	// Leave time for a forced close before Compose's default ten-second stop deadline.
 	err = serve(ctx, srv, listener, 5*time.Second)
 	if chatRuns != nil {
-		// Stops agent containers still running and records them as interrupted.
+		// Stops agent containers still running and records them as
+		// interrupted. Session runs keep going in their workers.
 		chatRuns.Close(3 * time.Second)
 	}
 	if err != nil {

@@ -1,0 +1,231 @@
+---
+# The model gateway: LiteLLM and its PostgreSQL (deploy/compose.models.yaml).
+# Included from main.yml while ember_models_enabled is true, before the
+# services are reconciled.
+
+- name: Require valid gateway models
+  ansible.builtin.assert:
+    that:
+      - item.model_name is defined and item.model_name is string
+      - item.model_name is match('^[A-Za-z0-9._:/@-]{1,200}$')
+      - item.model_name not in (ember_litellm_models[:index] | map(attribute='model_name'))
+      - item.litellm_params is mapping and item.litellm_params.model is defined
+      # A key written inline would end up in a world-readable file.
+      - item.litellm_params.api_key is not defined or item.litellm_params.api_key is match('^os\.environ/[A-Z][A-Z0-9_]*$')
+    fail_msg: >-
+      Each ember_litellm_models entry needs a unique model_name (letters,
+      digits and . _ : / @ -, up to 200) and litellm_params with a model.
+      Name a key as os.environ/NAME and put its value in
+      ember_litellm_provider_keys.NAME.
+    quiet: true
+  loop: "{{ ember_litellm_models }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.model_name | default('?') }}"
+
+- name: Require valid gateway secrets
+  ansible.builtin.assert:
+    that:
+      - ember_litellm_provider_keys is mapping
+      - ember_litellm_provider_keys.keys() | reject('match', '^[A-Z][A-Z0-9_]*$') | list | length == 0
+      - "'LITELLM_MASTER_KEY' not in ember_litellm_provider_keys"
+      - "'POSTGRES_PASSWORD' not in ember_litellm_provider_keys"
+      - ember_litellm_master_key | length == 0 or ember_litellm_master_key is match('^sk-[A-Za-z0-9_-]{16,}$')
+      - ember_litellm_db_password is match('^[A-Za-z0-9_-]*$')
+    fail_msg: >-
+      ember_litellm_provider_keys names environment variables
+      (^[A-Z][A-Z0-9_]*$, not LITELLM_MASTER_KEY or POSTGRES_PASSWORD).
+      ember_litellm_master_key starts with sk- and has at least 16 more
+      letters, digits, - or _. ember_litellm_db_password holds letters,
+      digits, - and _.
+    quiet: true
+  no_log: true
+
+- name: Create the gateway configuration directory
+  ansible.builtin.file:
+    path: "{{ ember_config_dir }}/litellm"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# LiteLLM runs as UID 65534 and reads every file here (deploy/compose.models.yaml).
+- name: Create the gateway secrets directory
+  ansible.builtin.file:
+    path: "{{ ember_litellm_secrets_dir }}"
+    state: directory
+    owner: "65534"
+    group: "65534"
+    mode: "0500"
+
+- name: Write the gateway configuration
+  ansible.builtin.copy:
+    content: "{{ ember_litellm_config | to_nice_yaml(indent=2, sort_keys=false) }}"
+    dest: "{{ ember_config_dir }}/litellm/config.yaml"
+    owner: root
+    group: root
+    mode: "0444"
+  vars:
+    ember_litellm_config:
+      model_list: "{{ ember_litellm_models }}"
+      general_settings:
+        master_key: os.environ/LITELLM_MASTER_KEY
+        database_url: os.environ/DATABASE_URL
+      litellm_settings:
+        # No usage telemetry, and no prompts or answers in LiteLLM's logs.
+        telemetry: false
+        turn_off_message_logging: true
+        drop_params: true
+  register: ember_litellm_config_file
+
+# Generated once unless supplied; never replaced afterwards, because virtual
+# keys and the database depend on them.
+- name: Install the gateway master key
+  ansible.builtin.copy:
+    content: >-
+      {{ ember_litellm_master_key if ember_litellm_master_key
+         else 'sk-' ~ lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}
+    dest: "{{ ember_litellm_secrets_dir }}/LITELLM_MASTER_KEY"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+    force: "{{ ember_litellm_master_key | length > 0 }}"
+  register: ember_litellm_master_secret
+  no_log: true
+
+# Also mounted into PostgreSQL, which runs as UID 70.
+- name: Install the gateway database password
+  ansible.builtin.copy:
+    content: >-
+      {{ ember_litellm_db_password if ember_litellm_db_password
+         else lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}
+    dest: "{{ ember_litellm_secrets_dir }}/POSTGRES_PASSWORD"
+    owner: "65534"
+    group: "70"
+    mode: "0440"
+    force: "{{ ember_litellm_db_password | length > 0 }}"
+  register: ember_litellm_db_secret
+  no_log: true
+
+- name: Install provider keys
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ ember_litellm_secrets_dir }}/{{ item.key }}"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+  loop: "{{ ember_litellm_provider_keys | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: ember_litellm_provider_secrets
+  no_log: true
+
+- name: List installed gateway secrets
+  ansible.builtin.find:
+    paths: "{{ ember_litellm_secrets_dir }}"
+    file_type: file
+    hidden: true
+  register: ember_litellm_secret_files
+
+- name: Remove provider keys no longer configured
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ ember_litellm_secret_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: (item.path | basename) not in (['LITELLM_MASTER_KEY', 'POSTGRES_PASSWORD'] + (ember_litellm_provider_keys.keys() | list))
+  register: ember_litellm_removed_secrets
+
+- name: Record whether LiteLLM needs a restart
+  ansible.builtin.set_fact:
+    ember_litellm_changed: >-
+      {{ ember_litellm_config_file is changed or ember_litellm_master_secret is changed
+         or ember_litellm_db_secret is changed or ember_litellm_provider_secrets is changed
+         or ember_litellm_removed_secrets is changed }}
+
+# Virtual keys: the API's lists models; the worker's is limited to its model
+# and budget. They are created once through LiteLLM, which must be running.
+- name: Look for the gateway keys
+  ansible.builtin.stat:
+    path: "{{ ember_config_dir }}/{{ item }}"
+  loop: "{{ ['model-gateway-key'] + (['opencode-gateway-key'] if ember_opencode_enabled | bool else []) }}"
+  register: ember_gateway_keys
+
+- name: Create missing gateway keys
+  when:
+    - ember_gateway_keys.results | rejectattr('stat.exists') | list | length > 0
+    - not ansible_check_mode
+  vars:
+    ember_gateway_key_specs:
+      # Read by the API (UID 65532). No model list: it lists them all.
+      - {file: model-gateway-key, alias: ember-api, models: "", budget: "", owner: "65532"}
+      # Passed to the worker by Compose; only root reads the file.
+      - file: opencode-gateway-key
+        alias: ember-opencode-worker
+        models: "{{ ember_opencode_model }}"
+        budget: "{{ ember_opencode_budget | string }}"
+        owner: "0"
+  block:
+    - name: Start the model gateway
+      community.docker.docker_compose_v2:
+        project_src: "{{ ember_install_dir }}/deploy"
+        project_name: "{{ ember_project_name }}"
+        files: "{{ ember_gateway_compose_files }}"
+        services: [litellm]
+        state: present
+        build: never
+        pull: policy
+        wait: true
+        wait_timeout: 180
+      environment: "{{ ember_compose_environment }}"
+
+    - name: Create the gateway keys
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', ember_project_name]
+             + (ember_gateway_compose_files | map('regex_replace', '^', '--file=') | list)
+             + ['exec', '-T', 'litellm', 'python', '-', item.alias, item.models, item.budget] }}
+        # The script reads the master key inside the container and prints
+        # only the new key (deploy/litellm/new-key.py).
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../../deploy/litellm/new-key.py') }}"
+        chdir: "{{ ember_install_dir }}/deploy"
+      environment: "{{ ember_compose_environment }}"
+      loop: >-
+        {{ ember_gateway_key_specs | selectattr('file', 'in',
+             ember_gateway_keys.results | rejectattr('stat.exists') | map(attribute='item') | list) | list }}
+      loop_control:
+        label: "{{ item.alias }}"
+      register: ember_new_gateway_keys
+      changed_when: true
+      no_log: true
+
+    - name: Install the gateway keys
+      ansible.builtin.copy:
+        content: "{{ item.stdout | trim }}\n"
+        dest: "{{ ember_config_dir }}/{{ item.item.file }}"
+        owner: "{{ item.item.owner }}"
+        group: "{{ item.item.owner }}"
+        mode: "0400"
+      loop: "{{ ember_new_gateway_keys.results }}"
+      loop_control:
+        label: "{{ item.item.file }}"
+      register: ember_gateway_key_files
+      no_log: true
+- name: Read the worker's gateway key
+  ansible.builtin.slurp:
+    src: "{{ ember_config_dir }}/opencode-gateway-key"
+  register: ember_opencode_gateway_key_file
+  when: ember_opencode_enabled | bool
+  failed_when: false
+  no_log: true
+
+# Compose needs a value even in check mode on a new host, before the key exists.
+- name: Pass the worker's gateway key to Compose
+  ansible.builtin.set_fact:
+    ember_opencode_gateway_key: >-
+      {{ (ember_opencode_gateway_key_file.content | b64decode | trim)
+         if ember_opencode_gateway_key_file.content is defined
+         else 'check-mode-placeholder' }}
+  when: ember_opencode_enabled | bool
+  no_log: true

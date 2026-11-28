@@ -69,6 +69,49 @@ for name in ("frontend", "web", "redis"):
     assert "/run/ember-router" not in [v.get("target") for v in services[name].get("volumes", [])]
     assert not services[name].get("group_add") or name == "redis"
 '
+# Model gateway and OpenCode worker overlays (docs/models.md), here without the
+# router: only LiteLLM has a route out, the worker is reachable only from the
+# API and reaches only LiteLLM, and no secret is in the rendered model.
+EMBER_AUTH_CONFIG_FILE=/etc/ember/auth.json EMBER_OIDC_CLIENT_SECRET_FILE=/etc/ember/oidc-client-secret \
+  EMBER_REDIS_PASSWORD_FILE=/etc/ember/redis-password EMBER_AGENTS_CONFIG_FILE=/etc/ember/agents.json \
+  EMBER_LITELLM_CONFIG_FILE=/etc/ember/litellm/config.yaml EMBER_LITELLM_SECRETS_DIR=/etc/ember/litellm/secrets \
+  EMBER_MODEL_GATEWAY_KEY_FILE=/etc/ember/model-gateway-key EMBER_OPENCODE_PASSWORD_FILE=/etc/ember/opencode-password \
+  EMBER_OPENCODE_GATEWAY_KEY=sk-test-worker-key EMBER_OPENCODE_MODEL=claude-sonnet \
+  docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml -f deploy/compose.redis.yaml \
+    -f deploy/compose.models.yaml -f deploy/compose.opencode.yaml config --format json |
+  python3 -c '
+import json, sys
+config = json.load(sys.stdin)
+services, networks = config["services"], config["networks"]
+assert sorted(services) == ["api", "frontend", "litellm", "litellm-db", "opencode-worker", "redis", "web"], sorted(services)
+nets = {name: sorted(s.get("networks", {})) for name, s in services.items()}
+assert nets["api"] == ["backend", "models", "opencode", "sessions"], nets["api"]
+assert nets["litellm"] == ["models", "models-db", "models-egress", "opencode-models"], nets["litellm"]
+assert nets["litellm-db"] == ["models-db"], nets["litellm-db"]
+assert nets["opencode-worker"] == ["opencode", "opencode-models"], nets["opencode-worker"]
+for name in ("models", "models-db", "opencode", "opencode-models"):
+    assert networks[name]["internal"] is True, name
+assert not networks["models-egress"].get("internal")
+assert [n for n, members in nets.items() if "models-egress" in members] == ["litellm"]
+for name in ("litellm", "litellm-db", "opencode-worker"):
+    s = services[name]
+    assert not s.get("ports"), name
+    assert "@sha256:" in s["image"], name
+    assert s["read_only"] is True and s["cap_drop"] == ["ALL"], name
+    assert "no-new-privileges:true" in s["security_opt"], name
+assert services["opencode-worker"]["runtime"] == "io.containerd.kata.v2"
+env = services["api"]["environment"]
+assert env["EMBER_MODEL_GATEWAY_URL"] == "http://litellm:4000"
+assert env["EMBER_MODEL_GATEWAY_KEY_FILE"] == "/run/secrets/ember-model-gateway-key"
+assert env["EMBER_AGENTS_CONFIG_FILE"] == "/etc/ember/agents.json"
+assert "group_add" not in services["api"]
+mounts = {v["target"]: v for v in services["api"]["volumes"]}
+assert mounts["/run/secrets/opencode_password"]["source"] == "/etc/ember/opencode-password"
+assert "/run/ember-router" not in mounts
+for name in ("frontend", "web", "redis", "litellm-db"):
+    assert "/run/secrets/litellm" not in [v.get("target") for v in services[name].get("volumes", [])]
+assert "sk-test-worker-key" not in json.dumps({k: v for k, v in services.items() if k != "opencode-worker"})
+'
 export COMPOSE_PROJECT_NAME="$project"
 EMBER_HTTP_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 export EMBER_HTTP_PORT

@@ -374,6 +374,10 @@ func TestChatRoutesNeedUserRole(t *testing.T) {
 		{"POST", "/v1/projects/desk/chats", `{"agent":"chat-fixture"}`},
 		{"GET", "/v1/projects/desk/chats/" + chat.ID, ""},
 		{"POST", "/v1/projects/desk/chats/" + chat.ID + "/messages", `{"content":"hi"}`},
+		{"GET", "/v1/projects/desk/chats/" + chat.ID + "/events", ""},
+		{"POST", "/v1/projects/desk/chats/" + chat.ID + "/interrupt", ""},
+		{"GET", "/v1/projects/desk/chats/" + chat.ID + "/permissions", ""},
+		{"POST", "/v1/projects/desk/chats/" + chat.ID + "/permissions/per_1", `{"decision":"once"}`},
 	} {
 		rr := httptest.NewRecorder()
 		f.noRole.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))

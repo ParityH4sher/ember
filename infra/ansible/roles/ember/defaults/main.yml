@@ -61,3 +61,50 @@ ember_agents_enabled: false
 # (deploy/compose.redis.yaml, ADR 014). Its password is generated on the host
 # once; supply one from Vault only to set it yourself (letters, digits, - and _).
 ember_redis_password: ""
+
+# Model gateway (docs/models.md, ADR 015): LiteLLM and its PostgreSQL
+# (deploy/compose.models.yaml). Provider endpoints and keys live only in the
+# gateway; Ember's admin page offers its models under display names. The
+# API's key for listing models and the OpenCode worker's key are LiteLLM
+# virtual keys the role creates once and keeps in /opt/ember/config.
+ember_models_enabled: false
+# LiteLLM's model_list: each entry is {model_name, litellm_params}. Name keys
+# as os.environ/NAME, never inline, and give the value in
+# ember_litellm_provider_keys. For example:
+#   - model_name: claude-sonnet
+#     litellm_params:
+#       model: anthropic/claude-sonnet-4-5
+#       api_key: os.environ/ANTHROPIC_API_KEY
+#   - model_name: qwen3-8b
+#     litellm_params:
+#       model: ollama_chat/qwen3:8b
+#       api_base: http://ollama.lan:11434
+ember_litellm_models: []
+# Provider keys by environment variable name, such as
+# {ANTHROPIC_API_KEY: "{{ vault_anthropic_api_key }}"}. Supply them from a
+# Vault file, never the inventory. Names not listed here are removed.
+ember_litellm_provider_keys: {}
+# Generated on the host once when empty; supply them from Vault only to set
+# them yourself. The master key starts with sk-; the database password holds
+# letters, digits, - and _.
+ember_litellm_master_key: ""
+ember_litellm_db_password: ""
+
+# An OpenCode worker for session agents (deploy/compose.opencode.yaml).
+# Requires ember_oidc_enabled and ember_models_enabled. Every chat with the
+# agent below is a session on this worker; chats share its workspace.
+ember_opencode_enabled: false
+# The agent people pick in the Notes app.
+ember_opencode_agent_id: coder
+ember_opencode_agent_name: Coder
+# The gateway model the worker uses: a model_name of ember_litellm_models.
+ember_opencode_model: ""
+# Spending limit in US dollars per 30 days for the worker's gateway key; empty
+# means none. Applied when the key is created (delete
+# /opt/ember/config/opencode-gateway-key to create a new one).
+ember_opencode_budget: ""
+# Agents run tools and generated code, so the worker runs in a Kata VM
+# (roles/kata). runc shares the host kernel: only for a trial on a host
+# without users' data, and only with ember_opencode_allow_runc.
+ember_opencode_runtime: io.containerd.kata.v2
+ember_opencode_allow_runc: false

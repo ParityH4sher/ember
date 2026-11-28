@@ -1,0 +1,116 @@
+# Overlay: an OpenCode worker for session agents (ADR 015; guide: docs/models.md).
+# The API drives one OpenCode session per chat on this worker. The worker has
+# no published port: only the API reaches it, on the internal `opencode`
+# network, and it reaches models only through LiteLLM, on the internal
+# `opencode-models` network. It needs deploy/compose.models.yaml (it attaches
+# LiteLLM to that network) and sign-in. install.sh adds it when
+# EMBER_OPENCODE_PASSWORD_FILE is set. Without the installer:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.oidc.yaml \
+#     -f deploy/compose.redis.yaml -f deploy/compose.models.yaml \
+#     -f deploy/compose.opencode.yaml up -d
+#
+# EMBER_AGENTS_CONFIG_FILE      absolute host path of the agents file. Its
+#                               workers list must contain
+#                               {"id": "opencode", "harness": "opencode",
+#                                "url": "http://opencode-worker:4096",
+#                                "passwordFile": "/run/secrets/opencode_password",
+#                                "directory": "/workspace"}.
+# EMBER_OPENCODE_PASSWORD_FILE  absolute host path of the password the API uses
+#                               for the worker: one line of at least 32
+#                               characters (openssl rand -hex 32). The API and
+#                               the worker both run as UID 65532: owner 65532,
+#                               mode 0400.
+# EMBER_OPENCODE_GATEWAY_KEY    a LiteLLM virtual key for this worker, limited
+#                               to its model and a budget. The agent can read
+#                               it (it runs in the worker), so never use the
+#                               master key here.
+# EMBER_OPENCODE_MODEL          the gateway model name the worker uses.
+# EMBER_OPENCODE_RUNTIME        container runtime; default io.containerd.kata.v2.
+#                               Agents run tools and generated code, so keep a
+#                               VM boundary. runc is for local trials only.
+services:
+  api:
+    environment:
+      EMBER_AGENTS_CONFIG_FILE: /etc/ember/agents.json
+    volumes:
+      # Also mounted by compose.agents.yaml when the sandbox router is used;
+      # the same target with the same source merges into one mount.
+      - type: bind
+        source: ${EMBER_AGENTS_CONFIG_FILE:?set EMBER_AGENTS_CONFIG_FILE to the host path of the agents file}
+        target: /etc/ember/agents.json
+        read_only: true
+      - type: bind
+        source: ${EMBER_OPENCODE_PASSWORD_FILE:?set EMBER_OPENCODE_PASSWORD_FILE to the host path of the worker password}
+        target: /run/secrets/opencode_password
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      opencode: {}
+
+  opencode-worker:
+    image: ghcr.io/anomalyco/opencode:2.3.2@sha256:be07cc4afd6d668d91b77accf1bc4338c87b39fbacc0a61666eb003781015f5a
+    runtime: ${EMBER_OPENCODE_RUNTIME:-io.containerd.kata.v2}
+    user: "65532:65532"
+    working_dir: /workspace
+    # Read the password from the shared secret file, so it never appears in
+    # this file, `docker inspect` or a command line.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        OPENCODE_PASSWORD=
+        IFS= read -r OPENCODE_PASSWORD < /run/secrets/opencode_password || true
+        if [ "$${#OPENCODE_PASSWORD}" -lt 32 ]; then
+          echo "The worker password file must hold one line of at least 32 characters." >&2
+          exit 1
+        fi
+        export OPENCODE_PASSWORD
+        exec opencode serve --hostname 0.0.0.0 --port 4096
+    environment:
+      HOME: /home/agent
+      LITELLM_API_KEY: ${EMBER_OPENCODE_GATEWAY_KEY:?set EMBER_OPENCODE_GATEWAY_KEY to a LiteLLM virtual key for this worker}
+      EMBER_OPENCODE_MODEL: ${EMBER_OPENCODE_MODEL:?set EMBER_OPENCODE_MODEL to a gateway model name}
+    volumes:
+      - type: bind
+        source: ./opencode/opencode.json
+        target: /etc/opencode/opencode.json
+        read_only: true
+      - type: bind
+        source: ${EMBER_OPENCODE_PASSWORD_FILE:?set EMBER_OPENCODE_PASSWORD_FILE to the host path of the worker password}
+        target: /run/secrets/opencode_password
+        read_only: true
+        bind:
+          create_host_path: false
+    # Every chat of this worker shares /workspace (ADR 015); it is lost when
+    # the worker is recreated. Project files are not mounted.
+    tmpfs:
+      - /home/agent:uid=65532,gid=65532,mode=0700,size=256m
+      - /workspace:uid=65532,gid=65532,mode=0700,size=256m
+      - /tmp:size=128m,mode=1777
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
+    expose:
+      - "4096"
+    networks:
+      opencode: {}
+      opencode-models: {}
+
+  litellm:
+    networks:
+      opencode-models: {}
+
+networks:
+  # Internal: the API and the worker only.
+  opencode:
+    internal: true
+  # Internal: the worker and LiteLLM only.
+  opencode-models:
+    internal: true

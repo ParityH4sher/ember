@@ -38,8 +38,8 @@ export const sections: NavSection[] = [
     { id: 'ember.admin', href: '/admin/', label: 'Admin', icon: 'shield', admin: true,
       description: 'Plugins, agents and access for this instance.', keywords: ['instance', 'operator'] },
     { id: 'ember.admin.ai', href: '/admin/ai/', label: 'Agents & models', icon: 'agent', admin: true,
-      description: 'Model providers, models and agents for project chat.',
-      keywords: ['ai', 'llm', 'claude', 'codex', 'openai', 'ollama', 'provider', 'api key'] }
+      description: 'Gateway models and agents for project chat.',
+      keywords: ['ai', 'llm', 'claude', 'codex', 'openai', 'ollama', 'gateway', 'litellm', 'opencode'] }
   ] }
 ];
 

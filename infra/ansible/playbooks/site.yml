@@ -20,6 +20,11 @@
     - security
     - tailscale
     - container-runtime
+    # The VM runtime for the OpenCode worker (deploy/compose.opencode.yaml).
+    - role: kata
+      when:
+        - ember_opencode_enabled | default(false) | bool
+        - (ember_opencode_runtime | default('io.containerd.kata.v2')) == 'io.containerd.kata.v2'
     # Project chat's agent runner, before ember: it records the socket group.
     - role: sandbox_router
       when: ember_agents_enabled | default(false) | bool

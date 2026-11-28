@@ -45,6 +45,8 @@ devcontainer and hot-reload setup.
   system options for keeping windows above others.
 - [Sign-in (OIDC)](authentication.md): optional OpenID Connect sign-in, its
   configuration file, and provider setup.
+- [Models and workers](models.md): configuring providers in the LiteLLM model
+  gateway, offering its models in Ember, and running an OpenCode worker.
 - [API reference](api-reference.md): hosted OpenAPI contract and interactive
   Swagger UI.
 - [POC implementation handoff](https://github.com/ParityH4sher/ember/blob/main/EMBER_POC_IMPLEMENTATION_BRIEF.md): detailed
@@ -105,6 +107,7 @@ recommendations based on documentation review; runtime qualification is still pe
 | [Mecatl](decisions/001-mecatl.md) | Defer for the initial prototype; retain as an engineering-runner candidate. | Sandboxed repository tasks if that feature becomes concrete. |
 | [OpenCode V2 SDK/client](decisions/002-opencode-sdk.md) | Not part of assistant core; evaluate for repository coding tasks. | Coding sessions behind Ember’s task API. |
 | [AI gateway shortlist](decisions/003-ai-gateway-shortlist.md) | Require system-wide monitoring and alerts; defer gateway selection pending qualification. | Provider routing, budget controls, and integration with activity and network auditing. |
+| [Harness sessions](decisions/015-harness-sessions.md) (2026-11-28) | Chat agents with tools are long-lived harness sessions (OpenCode) behind Ember's API; providers have one owner, the model gateway. | Project chat with streaming, steering, permissions and interrupt. |
 
 The assistant/orchestrator and isolated engineering runner are distinct roles.
 Keep Ember’s API, memory, personal integrations and authorization in Ember;

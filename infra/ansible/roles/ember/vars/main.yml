@@ -6,7 +6,16 @@ ember_compose_files: >-
      + (['compose.registry.yaml'] if ember_from_registry | bool else [])
      + (['compose.oidc.yaml', 'compose.redis.yaml'] if ember_oidc_enabled | bool else [])
      + (['compose.edge.yaml'] if ember_edge_enabled | bool else [])
-     + (['compose.agents.yaml'] if ember_agents_enabled | bool else []) }}
+     + (['compose.agents.yaml'] if ember_agents_enabled | bool else [])
+     + (['compose.models.yaml'] if ember_models_enabled | bool else [])
+     + (['compose.opencode.yaml'] if ember_opencode_enabled | bool else []) }}
+# Starts LiteLLM before the worker's gateway key exists: compose.opencode.yaml
+# requires that key.
+ember_gateway_compose_files: "{{ ember_compose_files | reject('equalto', 'compose.opencode.yaml') | list }}"
+# Whether the API reads an agents file: router agents, an OpenCode worker, or both.
+ember_chat_enabled: "{{ ember_agents_enabled | bool or ember_opencode_enabled | bool }}"
+ember_config_dir: "{{ ember_install_dir }}/config"
+ember_litellm_secrets_dir: "{{ ember_install_dir }}/config/litellm/secrets"
 # Host paths for deploy/compose.oidc.yaml and deploy/compose.redis.yaml, which
 # mount them read-only into the API (and Redis), the images for deploy/compose.registry.yaml, and the routed host for
 # deploy/compose.edge.yaml.
@@ -24,4 +33,14 @@ ember_compose_environment: >-
      | combine({'EMBER_AGENTS_CONFIG_FILE': ember_install_dir ~ '/config/agents.json',
                 'EMBER_ROUTER_SOCKET_DIR': sandbox_router_socket_dir_fact | default(''),
                 'EMBER_ROUTER_GID': sandbox_router_gid | default('') | string}
-               if ember_agents_enabled | bool else {}) }}
+               if ember_agents_enabled | bool else {})
+     | combine({'EMBER_LITELLM_CONFIG_FILE': ember_install_dir ~ '/config/litellm/config.yaml',
+                'EMBER_LITELLM_SECRETS_DIR': ember_litellm_secrets_dir,
+                'EMBER_MODEL_GATEWAY_KEY_FILE': ember_install_dir ~ '/config/model-gateway-key'}
+               if ember_models_enabled | bool else {})
+     | combine({'EMBER_AGENTS_CONFIG_FILE': ember_install_dir ~ '/config/agents.json',
+                'EMBER_OPENCODE_PASSWORD_FILE': ember_install_dir ~ '/config/opencode-password',
+                'EMBER_OPENCODE_GATEWAY_KEY': ember_opencode_gateway_key | default(''),
+                'EMBER_OPENCODE_MODEL': ember_opencode_model,
+                'EMBER_OPENCODE_RUNTIME': ember_opencode_runtime}
+               if ember_opencode_enabled | bool else {}) }}

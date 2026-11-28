@@ -1,138 +1,113 @@
-// Package aicatalog holds the model providers, models and agents an Ember
-// admin configures from the web app.
+// Package aicatalog holds the models and agents an Ember admin configures
+// from the web app (ADR 015).
 //
-// A provider is an endpoint and its credential (Anthropic, OpenAI, Ollama or
-// any OpenAI-compatible server). A model is an Ember alias for one upstream
-// model of a provider. An agent is a harness image registered in the sandbox
-// router policy (Claude Code, Codex, OpenCode or a custom image) plus the
-// models it may use.
+// Providers have one owner: the model gateway (LiteLLM, DEC-007). Provider
+// endpoints and keys live in the gateway's configuration, never here. A
+// catalog model offers one gateway model under a display name; its ID is the
+// gateway's model name. An agent is either a harness image registered in the
+// sandbox router policy (a turn agent) or a session on an operator-configured
+// harness worker (a session agent), plus the models it may use.
 //
-// Provider credentials stay in this process and its catalog file: they are
-// never returned by the API and never put in an agent's envelope. Agents learn
-// only the model alias they should ask for; reaching the model goes through
-// the model gateway (DEC-007), not through the agent holding a key.
+// The catalog file holds no secrets. It is still written with mode 0600
+// because older versions of it held provider keys.
 package aicatalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/ParityH4sher/ember/apps/api/internal/agents"
 )
 
 // Schema identifies the catalog file format.
-const Schema = "ember.ai-catalog/v1"
+const Schema = "ember.ai-catalog/v2"
 
-// Provider kinds.
-const (
-	KindAnthropic        = "anthropic"
-	KindOpenAI           = "openai"
-	KindOllama           = "ollama"
-	KindOpenAICompatible = "openai-compatible"
-)
+// schemaV1 is the format that also held providers and their keys. Open
+// migrates it.
+const schemaV1 = "ember.ai-catalog/v1"
 
-// Kinds lists the provider kinds in display order.
-var Kinds = []string{KindAnthropic, KindOpenAI, KindOllama, KindOpenAICompatible}
+// HarnessOpenCode is the harness of session agents: they run on a worker
+// from the operator's agents file instead of the sandbox router.
+const HarnessOpenCode = "opencode"
 
-// defaultBaseURL is used when an admin leaves the base URL empty. Ollama and
-// OpenAI-compatible servers live wherever the operator runs them.
-var defaultBaseURL = map[string]string{
-	KindAnthropic: "https://api.anthropic.com/v1",
-	KindOpenAI:    "https://api.openai.com/v1",
-}
-
-// Harnesses lists the agent harnesses an admin can pick. The harness is a
-// label for people and for the image author; the router image is what runs.
-var Harnesses = []string{"claude-code", "codex", "opencode", "custom"}
+// Harnesses lists the agent harnesses an admin can pick. For router agents
+// the harness is a label for people and for the image author; the router
+// image is what runs.
+var Harnesses = []string{"claude-code", "codex", HarnessOpenCode, "custom"}
 
 const (
-	maxProviders  = 32
 	maxModels     = 128
 	maxAgents     = 16
 	maxAgentModel = 16
 	maxName       = 80
-	maxUpstream   = 200
-	maxBaseURL    = 300
-	maxAPIKey     = 1024
+	maxModelID    = 200
 	maxFileBytes  = 1 << 20
 )
 
-// Provider is a model endpoint and its credential.
-type Provider struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	BaseURL string `json:"baseURL"`
-	// Local marks an endpoint on the operator's network. Hosted providers
-	// (Anthropic, OpenAI) are never local.
-	Local  bool   `json:"local"`
-	APIKey string `json:"apiKey,omitempty"`
+// modelID accepts a gateway model name such as "claude-sonnet",
+// "openai/gpt-4o" or "qwen3:8b". The character set keeps names safe in a URL
+// path segment (a "/" is sent percent-encoded) and in logs.
+var modelID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]*$`)
+
+// ValidModelID reports whether id can name a gateway model in the catalog.
+func ValidModelID(id string) bool {
+	return len(id) <= maxModelID && modelID.MatchString(id)
 }
 
-// Model is an Ember alias for one upstream model of a provider.
+// Model offers one gateway model under a display name.
 type Model struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Upstream string `json:"upstream"`
+	ID   string `json:"id"` // the gateway's model name
+	Name string `json:"name"`
 }
 
-// Agent is a harness image in the sandbox router policy and the models it
-// may use. DefaultModel is the one named in each chat turn.
+// Agent is a turn agent (RouterAgent set, run by the sandbox router) or a
+// session agent (Worker set, harness opencode) and the models it may use.
+// DefaultModel is the one named in each chat turn.
 type Agent struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Harness      string   `json:"harness"`
 	RouterAgent  string   `json:"routerAgent"`
+	Worker       string   `json:"worker"`
 	Models       []string `json:"models"`
 	DefaultModel string   `json:"defaultModel,omitempty"`
 	Enabled      bool     `json:"enabled"`
 }
 
 type file struct {
-	Schema    string     `json:"schema"`
-	Providers []Provider `json:"providers"`
-	Models    []Model    `json:"models"`
-	Agents    []Agent    `json:"agents"`
+	Schema string  `json:"schema"`
+	Models []Model `json:"models"`
+	Agents []Agent `json:"agents"`
 }
 
-// PublicProvider is a provider as the API shows it: the key is replaced by
-// whether one is set.
-type PublicProvider struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	BaseURL   string `json:"baseURL"`
-	Local     bool   `json:"local"`
-	HasAPIKey bool   `json:"hasAPIKey"`
-}
-
-// View is the whole catalog without secrets.
+// View is the whole catalog.
 type View struct {
-	Persisted bool             `json:"persisted"`
-	Providers []PublicProvider `json:"providers"`
-	Models    []Model          `json:"models"`
-	Agents    []Agent          `json:"agents"`
+	Persisted bool    `json:"persisted"`
+	Models    []Model `json:"models"`
+	Agents    []Agent `json:"agents"`
 }
 
-// ProviderInput is an admin's change to a provider. A nil APIKey keeps the
-// stored key; ClearAPIKey removes it.
-type ProviderInput struct {
-	Name        string  `json:"name"`
-	Kind        string  `json:"kind"`
-	BaseURL     string  `json:"baseURL"`
-	Local       bool    `json:"local"`
-	APIKey      *string `json:"apiKey,omitempty"`
-	ClearAPIKey bool    `json:"clearApiKey,omitempty"`
+// Migration describes what Open changed when it upgraded a v1 file. The zero
+// value means nothing was migrated.
+type Migration struct {
+	From string // the old schema, empty when nothing was migrated
+	// DroppedProviders and DroppedKeys count the providers and API keys
+	// removed from the file. The keys are gone: operators configure them in
+	// the model gateway instead.
+	DroppedProviders int
+	DroppedKeys      int
+	// Relabelled lists v1 agents with harness opencode that ran as router
+	// images; they keep running that way under harness custom.
+	Relabelled []string
 }
 
 // Errors returned by Store methods. A *ValidationError explains bad input.
@@ -164,15 +139,25 @@ type Store struct {
 	c    file
 	// reserved reports agent IDs taken by the operator's agents file.
 	reserved func(string) bool
+	// worker reports the worker IDs configured in the operator's agents file.
+	worker    func(string) bool
+	migration Migration
 }
+
+func never(string) bool { return false }
 
 // Open loads the catalog at path, or starts an empty one if the file does not
 // exist yet. An empty path keeps the catalog in memory. reserved, if not nil,
-// reports agent IDs an admin may not use.
-func Open(path string, reserved func(string) bool) (*Store, error) {
-	s := &Store{path: path, c: file{Schema: Schema}, reserved: reserved}
+// reports agent IDs an admin may not use; worker, if not nil, reports the
+// worker IDs a session agent may name. A v1 file is migrated and rewritten;
+// Migration reports what changed.
+func Open(path string, reserved, worker func(string) bool) (*Store, error) {
+	s := &Store{path: path, c: file{Schema: Schema}, reserved: reserved, worker: worker}
 	if s.reserved == nil {
-		s.reserved = func(string) bool { return false }
+		s.reserved = never
+	}
+	if s.worker == nil {
+		s.worker = never
 	}
 	if path == "" {
 		return s, nil
@@ -187,67 +172,121 @@ func Open(path string, reserved func(string) bool) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("AI catalog: %w", err)
 	}
-	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	f.Close()
 	if err != nil {
 		return nil, fmt.Errorf("AI catalog: %w", err)
 	}
 	if len(data) > maxFileBytes {
 		return nil, errors.New("AI catalog: file exceeds 1 MiB")
 	}
-	if err := json.Unmarshal(data, &s.c); err != nil {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
 		return nil, fmt.Errorf("AI catalog: %w", err)
 	}
-	if s.c.Schema != Schema {
-		return nil, fmt.Errorf("AI catalog: unsupported schema %q", s.c.Schema)
+	switch head.Schema {
+	case Schema:
+		if err := strictUnmarshal(data, &s.c); err != nil {
+			return nil, fmt.Errorf("AI catalog: %w", err)
+		}
+	case schemaV1:
+		c, m, err := migrateV1(data)
+		if err != nil {
+			return nil, fmt.Errorf("AI catalog: %w", err)
+		}
+		s.c, s.migration = c, m
+	default:
+		return nil, fmt.Errorf("AI catalog: unsupported schema %q", head.Schema)
 	}
-	if err := s.c.validate(s.reserved); err != nil {
+	if err := s.c.validate(s.reserved, s.worker); err != nil {
 		return nil, fmt.Errorf("AI catalog: %w", err)
+	}
+	if s.migration.From != "" {
+		// Rewrite now so the keys do not stay on disk until the next change.
+		if err := s.save(s.c); err != nil {
+			return nil, fmt.Errorf("AI catalog: migrating from %s: %w", s.migration.From, err)
+		}
 	}
 	return s, nil
 }
 
-// View returns the catalog without secrets.
+// strictUnmarshal rejects unknown fields, so a v2 file that still carries
+// provider keys (for example, copied by hand) is not silently accepted.
+func strictUnmarshal(data []byte, v any) error {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	return d.Decode(v)
+}
+
+// migrateV1 keeps model IDs and names and the agents of a v1 file and drops
+// its providers and their keys. v1 model IDs were already the names agents
+// asked the gateway for, so they stay valid.
+func migrateV1(data []byte) (file, Migration, error) {
+	var v1 struct {
+		Providers []struct {
+			APIKey string `json:"apiKey"`
+		} `json:"providers"`
+		Models []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"models"`
+		Agents []Agent `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &v1); err != nil {
+		return file{}, Migration{}, err
+	}
+	m := Migration{From: schemaV1, DroppedProviders: len(v1.Providers)}
+	for _, p := range v1.Providers {
+		if p.APIKey != "" {
+			m.DroppedKeys++
+		}
+	}
+	c := file{Schema: Schema, Models: []Model{}, Agents: []Agent{}}
+	for _, x := range v1.Models {
+		c.Models = append(c.Models, Model{ID: x.ID, Name: x.Name})
+	}
+	for _, a := range v1.Agents {
+		a.Worker = ""
+		if a.Models == nil {
+			a.Models = []string{}
+		}
+		// In v1, opencode was only a label on a router image. In v2 it means
+		// a session on a worker, so keep the image running as before.
+		if a.Harness == HarnessOpenCode {
+			a.Harness = "custom"
+			m.Relabelled = append(m.Relabelled, a.ID)
+		}
+		c.Agents = append(c.Agents, a)
+	}
+	return c, m, nil
+}
+
+// Migration reports what Open changed when it upgraded an older file.
+func (s *Store) Migration() Migration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m := s.migration
+	m.Relabelled = slices.Clone(m.Relabelled)
+	return m
+}
+
+// View returns the whole catalog.
 func (s *Store) View() View {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v := View{
-		Persisted: s.path != "",
-		Providers: make([]PublicProvider, 0, len(s.c.Providers)),
-		Models:    append([]Model{}, s.c.Models...),
-		Agents:    make([]Agent, 0, len(s.c.Agents)),
-	}
-	for _, p := range s.c.Providers {
-		v.Providers = append(v.Providers, PublicProvider{
-			ID: p.ID, Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, Local: p.Local, HasAPIKey: p.APIKey != "",
-		})
-	}
-	for _, a := range s.c.Agents {
-		a.Models = append([]string{}, a.Models...)
-		v.Agents = append(v.Agents, a)
-	}
-	return v
+	c := s.c.clone()
+	return View{Persisted: s.path != "", Models: c.Models, Agents: c.Agents}
 }
 
-// Provider returns a provider including its key, for calls made by the API.
-func (s *Store) Provider(id string) (Provider, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	i := slices.IndexFunc(s.c.Providers, func(p Provider) bool { return p.ID == id })
-	if i < 0 {
-		return Provider{}, false
-	}
-	return s.c.Providers[i], true
-}
-
-// Resolved is an enabled agent ready for a chat turn.
+// Resolved is an enabled agent ready for a chat.
 type Resolved struct {
-	Agent    Agent
-	Model    *Model // nil when the agent has no model
-	Provider *PublicProvider
+	Agent Agent
+	Model *Model // nil when the agent has no model
 }
 
-// Agent returns an enabled agent with its default model and provider.
+// Agent returns an enabled agent with its default model.
 func (s *Store) Agent(id string) (Resolved, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -259,9 +298,6 @@ func (s *Store) Agent(id string) (Resolved, bool) {
 	r.Agent.Models = append([]string{}, r.Agent.Models...)
 	if m, ok := s.c.model(r.Agent.DefaultModel); ok {
 		r.Model = &m
-		if p, ok := s.c.provider(m.Provider); ok {
-			r.Provider = &PublicProvider{ID: p.ID, Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, Local: p.Local, HasAPIKey: p.APIKey != ""}
-		}
 	}
 	return r, true
 }
@@ -280,65 +316,9 @@ func (s *Store) EnabledAgents() []Agent {
 	return out
 }
 
-// PutProvider creates or replaces the provider with this ID.
-func (s *Store) PutProvider(id string, in ProviderInput) (PublicProvider, error) {
-	var out PublicProvider
-	err := s.change(func(c *file) error {
-		p := Provider{ID: id, Name: strings.TrimSpace(in.Name), Kind: in.Kind, BaseURL: strings.TrimSpace(in.BaseURL), Local: in.Local}
-		i := slices.IndexFunc(c.Providers, func(p Provider) bool { return p.ID == id })
-		if i >= 0 {
-			p.APIKey = c.Providers[i].APIKey
-		}
-		switch {
-		case in.ClearAPIKey:
-			p.APIKey = ""
-		case in.APIKey != nil:
-			p.APIKey = strings.TrimSpace(*in.APIKey)
-		}
-		if p.BaseURL == "" {
-			p.BaseURL = defaultBaseURL[p.Kind]
-		}
-		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
-		if p.Kind == KindAnthropic || p.Kind == KindOpenAI {
-			p.Local = false
-		}
-		// A stored key goes only to the origin it was entered for: moving the
-		// provider without re-entering the key drops it, so nobody can send
-		// it to another server by editing the URL.
-		if i >= 0 && in.APIKey == nil && (c.Providers[i].BaseURL != p.BaseURL || c.Providers[i].Kind != p.Kind) {
-			p.APIKey = ""
-		}
-		if i >= 0 {
-			c.Providers[i] = p
-		} else {
-			c.Providers = append(c.Providers, p)
-		}
-		out = PublicProvider{ID: p.ID, Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, Local: p.Local, HasAPIKey: p.APIKey != ""}
-		return nil
-	})
-	return out, err
-}
-
-// DeleteProvider removes a provider no model uses.
-func (s *Store) DeleteProvider(id string) error {
-	return s.change(func(c *file) error {
-		i := slices.IndexFunc(c.Providers, func(p Provider) bool { return p.ID == id })
-		if i < 0 {
-			return ErrNotFound
-		}
-		for _, m := range c.Models {
-			if m.Provider == id {
-				return &InUseError{Msg: fmt.Sprintf("model %q uses this provider; delete or move it first", m.ID)}
-			}
-		}
-		c.Providers = slices.Delete(c.Providers, i, i+1)
-		return nil
-	})
-}
-
 // PutModel creates or replaces the model with this ID.
 func (s *Store) PutModel(id string, m Model) (Model, error) {
-	m.ID, m.Name, m.Upstream = id, strings.TrimSpace(m.Name), strings.TrimSpace(m.Upstream)
+	m.ID, m.Name = id, strings.TrimSpace(m.Name)
 	err := s.change(func(c *file) error {
 		if i := slices.IndexFunc(c.Models, func(x Model) bool { return x.ID == id }); i >= 0 {
 			c.Models[i] = m
@@ -371,6 +351,7 @@ func (s *Store) DeleteModel(id string) error {
 // becomes the first of its models.
 func (s *Store) PutAgent(id string, a Agent) (Agent, error) {
 	a.ID, a.Name = id, strings.TrimSpace(a.Name)
+	a.RouterAgent, a.Worker = strings.TrimSpace(a.RouterAgent), strings.TrimSpace(a.Worker)
 	if a.Models == nil {
 		a.Models = []string{}
 	}
@@ -409,7 +390,7 @@ func (s *Store) change(edit func(*file) error) error {
 	if err := edit(&next); err != nil {
 		return err
 	}
-	if err := next.validate(s.reserved); err != nil {
+	if err := next.validate(s.reserved, s.worker); err != nil {
 		return err
 	}
 	if err := s.save(next); err != nil {
@@ -419,8 +400,9 @@ func (s *Store) change(edit func(*file) error) error {
 	return nil
 }
 
-// save writes the catalog atomically, readable only by this process's user:
-// it holds provider keys.
+// save writes the catalog atomically, readable only by this process's user.
+// Renaming over the old file is not a secure erase: after a v1 migration the
+// old keys may linger in free disk blocks, so operators should rotate them.
 func (s *Store) save(c file) error {
 	if s.path == "" {
 		return nil
@@ -457,23 +439,14 @@ func (s *Store) save(c file) error {
 
 func (c file) clone() file {
 	n := file{Schema: Schema,
-		Providers: append([]Provider{}, c.Providers...),
-		Models:    append([]Model{}, c.Models...),
-		Agents:    make([]Agent, 0, len(c.Agents)),
+		Models: append([]Model{}, c.Models...),
+		Agents: make([]Agent, 0, len(c.Agents)),
 	}
 	for _, a := range c.Agents {
 		a.Models = append([]string{}, a.Models...)
 		n.Agents = append(n.Agents, a)
 	}
 	return n
-}
-
-func (c *file) provider(id string) (Provider, bool) {
-	i := slices.IndexFunc(c.Providers, func(p Provider) bool { return p.ID == id })
-	if i < 0 {
-		return Provider{}, false
-	}
-	return c.Providers[i], true
 }
 
 func (c *file) model(id string) (Model, bool) {
@@ -484,30 +457,17 @@ func (c *file) model(id string) (Model, bool) {
 	return c.Models[i], true
 }
 
-func (c *file) validate(reserved func(string) bool) error {
-	if len(c.Providers) > maxProviders {
-		return invalid("configure at most %d providers", maxProviders)
-	}
+func (c *file) validate(reserved, worker func(string) bool) error {
 	if len(c.Models) > maxModels {
 		return invalid("configure at most %d models", maxModels)
 	}
 	if len(c.Agents) > maxAgents {
 		return invalid("configure at most %d agents", maxAgents)
 	}
-	providers := map[string]bool{}
-	for _, p := range c.Providers {
-		if err := p.validate(); err != nil {
-			return err
-		}
-		if providers[p.ID] {
-			return invalid("provider %q is listed twice", p.ID)
-		}
-		providers[p.ID] = true
-	}
 	models := map[string]bool{}
 	for _, m := range c.Models {
-		if !agents.ValidID(m.ID) {
-			return invalid("model ID %q: use 1 to 63 lowercase letters, digits and hyphens, starting with a letter", m.ID)
+		if !ValidModelID(m.ID) {
+			return invalid("model ID %q: use the gateway's model name, 1 to %d letters, digits and . _ : / @ - characters, starting with a letter or digit", m.ID, maxModelID)
 		}
 		if models[m.ID] {
 			return invalid("model %q is listed twice", m.ID)
@@ -515,12 +475,6 @@ func (c *file) validate(reserved func(string) bool) error {
 		models[m.ID] = true
 		if !agents.ValidLabel(m.Name, maxName) {
 			return invalid("model %q needs a name of 1 to %d characters on one line", m.ID, maxName)
-		}
-		if !providers[m.Provider] {
-			return invalid("model %q names provider %q, which does not exist", m.ID, m.Provider)
-		}
-		if !validUpstream(m.Upstream) {
-			return invalid("model %q needs the provider's model ID: 1 to %d characters without spaces", m.ID, maxUpstream)
 		}
 	}
 	seen := map[string]bool{}
@@ -541,8 +495,20 @@ func (c *file) validate(reserved func(string) bool) error {
 		if !slices.Contains(Harnesses, a.Harness) {
 			return invalid("agent %q: harness must be one of %s", a.ID, strings.Join(Harnesses, ", "))
 		}
-		if !agents.ValidID(a.RouterAgent) {
-			return invalid("agent %q: the router agent must be a policy name from the sandbox router (lowercase letters, digits and hyphens)", a.ID)
+		if a.Harness == HarnessOpenCode {
+			if a.RouterAgent != "" {
+				return invalid("agent %q: an opencode agent runs on a worker; leave the router agent empty", a.ID)
+			}
+			if !agents.ValidID(a.Worker) || !worker(a.Worker) {
+				return invalid("agent %q: choose a worker from the operator's agents file", a.ID)
+			}
+		} else {
+			if a.Worker != "" {
+				return invalid("agent %q: only opencode agents run on a worker; leave the worker empty", a.ID)
+			}
+			if !agents.ValidID(a.RouterAgent) {
+				return invalid("agent %q: the router agent must be a policy name from the sandbox router (lowercase letters, digits and hyphens)", a.ID)
+			}
 		}
 		if len(a.Models) > maxAgentModel {
 			return invalid("agent %q may list at most %d models", a.ID, maxAgentModel)
@@ -562,43 +528,6 @@ func (c *file) validate(reserved func(string) bool) error {
 		}
 		if a.DefaultModel == "" && len(a.Models) > 0 {
 			return invalid("agent %q needs a default model", a.ID)
-		}
-	}
-	return nil
-}
-
-// validUpstream accepts a provider's model ID, such as "qwen3:8b".
-func validUpstream(s string) bool {
-	return agents.ValidLabel(s, maxUpstream) && strings.IndexFunc(s, unicode.IsSpace) < 0
-}
-
-func (p Provider) validate() error {
-	if !agents.ValidID(p.ID) {
-		return invalid("provider ID %q: use 1 to 63 lowercase letters, digits and hyphens, starting with a letter", p.ID)
-	}
-	if !agents.ValidLabel(p.Name, maxName) {
-		return invalid("provider %q needs a name of 1 to %d characters on one line", p.ID, maxName)
-	}
-	if !slices.Contains(Kinds, p.Kind) {
-		return invalid("provider %q: kind must be one of %s", p.ID, strings.Join(Kinds, ", "))
-	}
-	if p.BaseURL == "" {
-		return invalid("provider %q needs a base URL", p.ID)
-	}
-	u, err := url.Parse(p.BaseURL)
-	if err != nil || len(p.BaseURL) > maxBaseURL || (u.Scheme != "http" && u.Scheme != "https") ||
-		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return invalid("provider %q: the base URL must be an http or https URL without credentials, query or fragment", p.ID)
-	}
-	if !p.Local && u.Scheme != "https" {
-		return invalid("provider %q: a hosted provider needs an https base URL; mark it local if it runs on your network", p.ID)
-	}
-	if len(p.APIKey) > maxAPIKey {
-		return invalid("provider %q: the API key is longer than %d bytes", p.ID, maxAPIKey)
-	}
-	for _, r := range p.APIKey {
-		if r <= ' ' || r > '~' {
-			return invalid("provider %q: the API key may contain only printable ASCII without spaces", p.ID)
 		}
 	}
 	return nil

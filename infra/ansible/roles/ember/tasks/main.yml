@@ -111,6 +111,17 @@
     path: "{{ ember_install_dir }}/apps/frontends/home"
     state: absent
 
+- name: Create directories for overlay files
+  ansible.builtin.file:
+    path: "{{ ember_install_dir }}/deploy/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - litellm
+    - opencode
+
 - name: Install Compose manifests
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../../deploy/{{ item }}"
@@ -128,6 +139,12 @@
     - compose.edge.yaml
     - compose.registry.yaml
     - compose.agents.yaml
+    - compose.models.yaml
+    - compose.opencode.yaml
+    # The OpenCode worker's configuration and the gateway key script.
+    - opencode/opencode.json
+    - litellm/new-key.py
+  register: ember_manifests
 
 - name: Prepare to pull prebuilt images
   when: ember_from_registry | bool
@@ -281,21 +298,41 @@
           role earlier in the play (playbooks/site.yml).
         quiet: true
 
-    # Read by the API (UID 65532); it holds no secret. routerSocket is the
-    # path inside the API container, where compose.agents.yaml mounts the
-    # router's socket directory.
-    - name: Write the project chat agents file
-      ansible.builtin.copy:
-        content: "{{ ember_agents_config | to_nice_json }}\n"
-        dest: "{{ ember_install_dir }}/config/agents.json"
-        owner: root
-        group: root
-        mode: "0444"
-      vars:
-        ember_agents_config:
-          routerSocket: /run/ember-router/router.sock
-          agents: "{{ sandbox_router_chat_agents | community.general.keep_keys(target=['id', 'name']) }}"
-      register: ember_agents_config_file
+- name: Configure the OpenCode worker
+  ansible.builtin.include_tasks: opencode.yml
+  when: ember_opencode_enabled | bool
+
+- name: Configure the model gateway
+  ansible.builtin.include_tasks: models.yml
+  when: ember_models_enabled | bool
+
+# Read by the API (UID 65532); it holds no secret. Paths are inside the API
+# container: compose.agents.yaml mounts the router's socket directory and
+# compose.opencode.yaml the worker password.
+- name: Write the project chat agents file
+  ansible.builtin.copy:
+    content: "{{ ember_agents_config | to_nice_json }}\n"
+    dest: "{{ ember_config_dir }}/agents.json"
+    owner: root
+    group: root
+    mode: "0444"
+  vars:
+    ember_router_agents: >-
+      {{ sandbox_router_chat_agents | community.general.keep_keys(target=['id', 'name'])
+         if ember_agents_enabled | bool else [] }}
+    ember_worker_agents: >-
+      {{ [{'id': ember_opencode_agent_id, 'name': ember_opencode_agent_name, 'worker': 'opencode'}]
+         if ember_opencode_enabled | bool else [] }}
+    ember_agents_config: >-
+      {{ ({'routerSocket': '/run/ember-router/router.sock'} if ember_agents_enabled | bool else {})
+         | combine({'workers': [{'id': 'opencode', 'harness': 'opencode',
+                                 'url': 'http://opencode-worker:4096',
+                                 'passwordFile': '/run/secrets/opencode_password',
+                                 'directory': '/workspace'}]}
+                   if ember_opencode_enabled | bool else {})
+         | combine({'agents': ember_router_agents + ember_worker_agents}) }}
+  register: ember_agents_config_file
+  when: ember_chat_enabled | bool
 
 - name: Fingerprint installed build inputs
   ansible.builtin.find:
@@ -341,22 +378,33 @@
   environment: "{{ ember_compose_environment }}"
   register: ember_reconcile
 
-# The API reads its sign-in and agents files only at startup, and Compose does
-# not notice changed contents of mounted files. A new Redis password needs Redis
-# restarted too, which keeps its data but makes the API reconnect.
-- name: Restart the API after a sign-in or agents configuration change
+# Services read their configuration and secrets only at startup, and Compose
+# does not notice changed contents of mounted files. A new Redis password needs
+# Redis restarted too, which keeps its data but makes the API reconnect.
+- name: Restart services after a configuration or secret change
   community.docker.docker_compose_v2:
     project_src: "{{ ember_install_dir }}/deploy"
     project_name: "{{ ember_project_name }}"
     files: "{{ ember_compose_files }}"
-    services: "{{ ['redis', 'api'] if ember_redis_secret is changed else ['api'] }}"
+    services: "{{ ember_restart_services }}"
     state: restarted
   environment: "{{ ember_compose_environment }}"
+  vars:
+    ember_opencode_json_changed: >-
+      {{ ember_manifests.results | selectattr('item', 'equalto', 'opencode/opencode.json')
+         | selectattr('changed') | list | length > 0 }}
+    ember_restart_services: >-
+      {{ (['redis'] if (ember_redis_secret | default({})) is changed else [])
+         + (['litellm'] if ember_litellm_changed | default(false) | bool else [])
+         + (['api'] if (ember_oidc_config_file | default({})) is changed or (ember_oidc_secret | default({})) is changed
+                       or (ember_redis_secret | default({})) is changed or (ember_agents_config_file | default({})) is changed
+                       or (ember_gateway_key_files | default({})) is changed or (ember_opencode_password | default({})) is changed
+            else [])
+         + (['opencode-worker'] if ember_opencode_enabled | bool
+                                  and ((ember_opencode_password | default({})) is changed or ember_opencode_json_changed | bool)
+            else []) }}
   when:
-    - ember_oidc_enabled | bool
-    - >-
-      ember_oidc_config_file is changed or ember_oidc_secret is changed
-      or ember_redis_secret is changed or ember_agents_config_file is changed
+    - ember_restart_services | length > 0
     - ember_reconcile is not changed
 
 - name: Record successfully deployed build inputs

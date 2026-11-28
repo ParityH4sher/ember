@@ -78,6 +78,6 @@ networks:
 
 volumes:
   projects:
-  # The admin AI catalog: model providers (with their API keys), models and
-  # agents. Back it up like a secret.
+  # The admin AI catalog: offered gateway models and agents. It holds no keys
+  # (providers live in the model gateway, compose.models.yaml); back it up.
   ai:

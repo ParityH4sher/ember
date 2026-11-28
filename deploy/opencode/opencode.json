@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "gateway/default",
+  "providers": {
+    "gateway": {
+      "name": "Ember model gateway",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "env": ["LITELLM_API_KEY"],
+      "settings": {"baseURL": "http://litellm:4000/v1"},
+      "models": {"default": {"modelID": "{env:EMBER_OPENCODE_MODEL}"}}
+    }
+  }
+}
