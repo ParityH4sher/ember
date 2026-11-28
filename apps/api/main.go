@@ -101,19 +101,31 @@ func run(ctx context.Context, address string, logger *slog.Logger) error {
 	if err := agentsAllowed(agentsConfig, authn.Mode()); err != nil {
 		return err
 	}
-	// Admins add providers, models and agents from the web app. Without a
+	// Admins offer gateway models and add agents from the web app. Without a
 	// file, the catalog lives in memory and is lost when the API stops.
+	// TODO(harness): pass the worker IDs from the agents file as the third
+	// argument and httpapi.WithWorkers once agents.Config has workers.
 	catalog, err := aicatalog.Open(os.Getenv("EMBER_AI_CATALOG_FILE"), func(id string) bool {
 		if agentsConfig == nil {
 			return false
 		}
 		_, taken := agentsConfig.Agent(id)
 		return taken
-	})
+	}, nil)
 	if err != nil {
 		return err
 	}
-	options := []httpapi.Option{httpapi.WithAICatalog(catalog)}
+	if m := catalog.Migration(); m.From != "" {
+		logger.Warn("AI catalog migrated; provider settings now belong in the model gateway",
+			"from", m.From, "droppedProviders", m.DroppedProviders, "discardedAPIKeys", m.DroppedKeys, "relabelledAgents", m.Relabelled)
+	}
+	// Providers and their keys live in the model gateway (ADR 015); Ember only
+	// lists its models for the admin page.
+	gateway, err := aicatalog.LoadGateway(os.Getenv("EMBER_MODEL_GATEWAY_URL"), os.Getenv("EMBER_MODEL_GATEWAY_KEY_FILE"))
+	if err != nil {
+		return err
+	}
+	options := []httpapi.Option{httpapi.WithAICatalog(catalog), httpapi.WithModelGateway(gateway)}
 	var chatRuns *httpapi.ChatRuns
 	agentCount := 0
 	if agentsConfig != nil {

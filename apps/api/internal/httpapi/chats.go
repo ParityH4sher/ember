@@ -174,11 +174,8 @@ func (h *chatAPI) resolveAgent(id string) (chatAgent, bool) {
 		return chatAgent{}, false
 	}
 	out := chatAgent{router: r.Agent.RouterAgent}
-	if r.Model != nil && r.Provider != nil {
-		out.model = &agents.ModelRef{
-			ID: r.Model.ID, Name: r.Model.Name, ProviderKind: r.Provider.Kind,
-			Upstream: r.Model.Upstream, Local: r.Provider.Local,
-		}
+	if r.Model != nil {
+		out.model = &agents.ModelRef{ID: r.Model.ID, Name: r.Model.Name}
 	}
 	return out, true
 }

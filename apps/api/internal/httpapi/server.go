@@ -36,9 +36,10 @@ func NewHandler(version string, vaults *projects.Vaults, services ...ServiceLink
 type Option func(*options)
 
 type options struct {
-	chatRuns  *ChatRuns
-	catalog   *aicatalog.Store
-	discovery *http.Client
+	chatRuns *ChatRuns
+	catalog  *aicatalog.Store
+	gateway  *aicatalog.Gateway
+	workers  []WorkerInfo
 }
 
 // WithChatRuns lets chats start agent runs. Without it, chats are read-only
@@ -47,16 +48,23 @@ func WithChatRuns(runs *ChatRuns) Option {
 	return func(o *options) { o.chatRuns = runs }
 }
 
-// WithAICatalog uses store for the providers, models and agents admins
-// configure. Without it, the handler keeps an in-memory catalog.
+// WithAICatalog uses store for the models and agents admins configure.
+// Without it, the handler keeps an in-memory catalog.
 func WithAICatalog(store *aicatalog.Store) Option {
 	return func(o *options) { o.catalog = store }
 }
 
-// WithDiscoveryClient sets the HTTP client that lists a provider's models,
-// for tests. The default follows no redirects and times out.
-func WithDiscoveryClient(client *http.Client) Option {
-	return func(o *options) { o.discovery = client }
+// WithModelGateway lets admins list the model gateway's models. Without it
+// (or with nil), GET /v1/admin/ai/gateway/models answers 503.
+func WithModelGateway(gateway *aicatalog.Gateway) Option {
+	return func(o *options) { o.gateway = gateway }
+}
+
+// WithWorkers names the harness workers from the operator's agents file, for
+// the admin page. The catalog's own worker check is the callback passed to
+// aicatalog.Open.
+func WithWorkers(workers []WorkerInfo) Option {
+	return func(o *options) { o.workers = append([]WorkerInfo{}, workers...) }
 }
 
 func NewDeploymentHandler(version string, vaults *projects.Vaults, services []ServiceLink, extra []plugins.Registration, opts ...Option) http.Handler {
@@ -112,14 +120,11 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 	route("GET /v1/projects", auth.RoleUser, server.listProjects)
 	route("DELETE /v1/projects/{projectId}", auth.RoleUser, server.deleteProject)
 	if o.catalog == nil {
-		o.catalog, _ = aicatalog.Open("", nil) // in memory; cannot fail
-	}
-	if o.discovery == nil {
-		o.discovery = aicatalog.NewDiscoveryClient()
+		o.catalog, _ = aicatalog.Open("", nil, nil) // in memory; cannot fail
 	}
 	chats := &chatAPI{runs: o.chatRuns, catalog: o.catalog, projects: store}
 	route("GET /v1/agents", auth.RoleUser, chats.listAgents)
-	ai := &aiAdmin{catalog: o.catalog, client: o.discovery, chats: chats, operator: func() []agentInfo {
+	ai := &aiAdmin{catalog: o.catalog, gateway: o.gateway, workers: o.workers, chats: chats, operator: func() []agentInfo {
 		list := []agentInfo{}
 		if chats.runs != nil {
 			for _, a := range chats.runs.config.Agents {
@@ -129,9 +134,7 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 		return list
 	}}
 	route("GET /v1/admin/ai", auth.RoleAdmin, ai.get)
-	route("PUT /v1/admin/ai/providers/{id}", auth.RoleAdmin, ai.putProvider)
-	route("DELETE /v1/admin/ai/providers/{id}", auth.RoleAdmin, ai.deleteProvider)
-	route("POST /v1/admin/ai/providers/{id}/discover", auth.RoleAdmin, ai.discover)
+	route("GET /v1/admin/ai/gateway/models", auth.RoleAdmin, ai.gatewayModels)
 	route("PUT /v1/admin/ai/models/{id}", auth.RoleAdmin, ai.putModel)
 	route("DELETE /v1/admin/ai/models/{id}", auth.RoleAdmin, ai.deleteModel)
 	route("PUT /v1/admin/ai/agents/{id}", auth.RoleAdmin, ai.putAgent)

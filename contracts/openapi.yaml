@@ -348,7 +348,7 @@ paths:
         Chat runs are off unless the operator supplies an agents configuration
         file (EMBER_AGENTS_CONFIG_FILE) naming the sandbox router. The list has
         the agents in that file followed by the enabled agents admins added
-        under /v1/admin/ai/agents. It never includes provider endpoints or keys.
+        under /v1/admin/ai/agents. It never includes gateway endpoints or keys.
       responses:
         "401":
           $ref: "#/components/responses/Unauthenticated"
@@ -363,75 +363,64 @@ paths:
   /v1/admin/ai:
     get:
       operationId: getAICatalog
-      summary: Model providers, models and agents (admin)
+      summary: Models, agents, workers and gateway status (admin)
       description: >-
-        Requires the admin role. Provider keys are never returned; each
-        provider reports hasAPIKey instead.
+        Requires the admin role. Providers and their keys are configured in the
+        model gateway (LiteLLM), never in Ember (ADR 015), so nothing here is
+        secret.
       responses:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/AdminWriteForbidden"}
         "200":
-          description: The catalog without secrets
+          description: The catalog
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AICatalog"}
-  /v1/admin/ai/providers/{id}:
-    parameters:
-      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
-    put:
-      operationId: putModelProvider
-      summary: Create or replace a model provider (admin)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/ModelProviderInput"}
-      responses:
-        "200":
-          description: The saved provider
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ModelProvider"}
-        "400": {description: Malformed body}
-        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
-        "422": {description: "invalid_configuration: the message says what to correct"}
-    delete:
-      operationId: deleteModelProvider
-      summary: Delete a provider and its stored key (admin)
-      responses:
-        "204": {description: Deleted}
-        "403": {$ref: "#/components/responses/AdminWriteForbidden"}
-        "404": {description: No such provider}
-        "409": {description: "in_use: a model still uses this provider"}
-  /v1/admin/ai/providers/{id}/discover:
-    parameters:
-      - {name: id, in: path, required: true, schema: {type: string}}
-    post:
-      operationId: discoverProviderModels
-      summary: List the models a provider offers (admin)
+  /v1/admin/ai/gateway/models:
+    get:
+      operationId: listGatewayModels
+      summary: List the models the model gateway offers (admin)
       description: >-
-        The API calls the provider's model list (Ollama /api/tags, otherwise
-        {baseURL}/models) with the stored key, following no redirects, with a
-        10 s timeout. Upstream error bodies are not passed on.
+        The API calls GET {EMBER_MODEL_GATEWAY_URL}/v1/models with the gateway
+        key from EMBER_MODEL_GATEWAY_KEY_FILE, following no redirects, with a
+        10 s timeout. Names the catalog cannot store are left out. The
+        gateway's error bodies are never passed on.
       responses:
         "200":
-          description: Upstream model IDs, sorted
+          description: Gateway model names, sorted
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required: [models]
                 properties:
-                  models: {type: array, items: {type: string}}
+                  models:
+                    type: array
+                    maxItems: 500
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id]
+                      properties:
+                        id: {type: string, description: "The gateway's model name."}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/AdminWriteForbidden"}
-        "404": {description: No such provider}
-        "502": {description: "discovery_failed: unreachable, refused or not a model list"}
+        "503":
+          description: "gateway_unavailable: no gateway is configured, or it is unreachable, refused the key or did not answer with a model list"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
   /v1/admin/ai/models/{id}:
     parameters:
-      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+      - name: id
+        in: path
+        required: true
+        description: The gateway's model name; a "/" in it is sent as %2F.
+        schema: {type: string, maxLength: 200, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@-]*$'}
     put:
       operationId: putCatalogModel
-      summary: Create or replace a model alias (admin)
+      summary: Offer a gateway model under a display name (admin)
       requestBody:
         required: true
         content:
@@ -439,22 +428,21 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [name, provider, upstream]
+              required: [name]
               properties:
-                name: {type: string}
-                provider: {type: string}
-                upstream: {type: string}
+                name: {type: string, maxLength: 80}
       responses:
         "200":
           description: The saved model
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CatalogModel"}
+        "400": {description: Malformed body}
         "403": {$ref: "#/components/responses/AdminWriteForbidden"}
         "422": {description: invalid_configuration}
     delete:
       operationId: deleteCatalogModel
-      summary: Delete a model alias (admin)
+      summary: Stop offering a model (admin)
       responses:
         "204": {description: Deleted}
         "403": {$ref: "#/components/responses/AdminWriteForbidden"}
@@ -473,11 +461,12 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [name, harness, routerAgent, enabled]
+              required: [name, harness, enabled]
               properties:
                 name: {type: string}
                 harness: {type: string}
-                routerAgent: {type: string}
+                routerAgent: {type: string, description: Required unless harness is opencode.}
+                worker: {type: string, description: Required when harness is opencode.}
                 models: {type: array, items: {type: string}}
                 defaultModel: {type: string}
                 enabled: {type: boolean}
@@ -1304,66 +1293,37 @@ components:
         model:
           type: string
           description: Display name of the agent's default model, if an admin set one.
-    ModelProvider:
-      type: object
-      additionalProperties: false
-      required: [id, name, kind, baseURL, local, hasAPIKey]
-      properties:
-        id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}
-        name: {type: string, maxLength: 80}
-        kind: {type: string, enum: [anthropic, openai, ollama, openai-compatible]}
-        baseURL:
-          type: string
-          format: uri
-          description: API base, e.g. https://api.anthropic.com/v1 or http://ollama.lan:11434.
-        local:
-          type: boolean
-          description: Served on the operator's network. Always false for anthropic and openai.
-        hasAPIKey:
-          type: boolean
-          description: Whether a key is stored. The key itself is never returned.
-    ModelProviderInput:
-      type: object
-      additionalProperties: false
-      required: [name, kind]
-      properties:
-        name: {type: string, maxLength: 80}
-        kind: {type: string, enum: [anthropic, openai, ollama, openai-compatible]}
-        baseURL:
-          type: string
-          description: >-
-            http(s) URL without credentials, query or fragment. Empty uses the
-            default for anthropic and openai. A hosted provider needs https.
-        local: {type: boolean}
-        apiKey:
-          type: string
-          writeOnly: true
-          maxLength: 1024
-          description: >-
-            Omit to keep the stored key. If baseURL or kind changes and apiKey
-            is omitted, the stored key is removed.
-        clearApiKey: {type: boolean}
     CatalogModel:
       type: object
       additionalProperties: false
-      required: [id, name, provider, upstream]
+      required: [id, name]
       properties:
-        id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: Alias agents ask the model gateway for.}
+        id:
+          type: string
+          maxLength: 200
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@-]*$'
+          description: The gateway's model name, which agents ask the gateway for.
         name: {type: string, maxLength: 80}
-        provider: {type: string, description: ID of a configured provider.}
-        upstream: {type: string, maxLength: 200, description: "The provider's model ID, e.g. qwen3:8b."}
     CatalogAgent:
       type: object
       additionalProperties: false
-      required: [id, name, harness, routerAgent, models, enabled]
+      required: [id, name, harness, routerAgent, worker, models, enabled]
+      description: >-
+        A turn agent (routerAgent set, worker empty) runs in the sandbox
+        router. A session agent (harness opencode, worker set, routerAgent
+        empty) is a session on a worker from the operator's agents file.
       properties:
         id: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: Must not match an agent in the operator's agents file.}
         name: {type: string, maxLength: 80}
         harness: {type: string, enum: [claude-code, codex, opencode, custom]}
         routerAgent:
           type: string
-          pattern: '^[a-z][a-z0-9-]{0,62}$'
-          description: The harness image's name in the sandbox router policy.
+          pattern: '^([a-z][a-z0-9-]{0,62})?$'
+          description: The harness image's name in the sandbox router policy; empty for opencode.
+        worker:
+          type: string
+          pattern: '^([a-z][a-z0-9-]{0,62})?$'
+          description: ID of a worker listed in workers; set only for opencode.
         models:
           type: array
           maxItems: 16
@@ -1374,17 +1334,32 @@ components:
         enabled:
           type: boolean
           description: Whether people can start chats with this agent.
+    Worker:
+      type: object
+      additionalProperties: false
+      required: [id, harness]
+      description: A harness worker from the operator's agents file; its URL and password are not shown.
+      properties:
+        id: {type: string}
+        harness: {type: string, enum: [opencode]}
     AICatalog:
       type: object
       additionalProperties: false
-      required: [persisted, chatEnabled, providerKinds, harnesses, operatorAgents, providers, models, agents]
+      required: [persisted, chatEnabled, harnesses, workers, gateway, operatorAgents, models, agents]
       properties:
         persisted: {type: boolean, description: False when the API has no EMBER_AI_CATALOG_FILE.}
         chatEnabled: {type: boolean}
-        providerKinds: {type: array, items: {type: string}}
         harnesses: {type: array, items: {type: string}}
+        workers: {type: array, items: {$ref: "#/components/schemas/Worker"}}
+        gateway:
+          type: object
+          additionalProperties: false
+          required: [configured]
+          properties:
+            configured:
+              type: boolean
+              description: Whether EMBER_MODEL_GATEWAY_URL and its key file are set.
         operatorAgents: {type: array, items: {$ref: "#/components/schemas/Agent"}}
-        providers: {type: array, items: {$ref: "#/components/schemas/ModelProvider"}}
         models: {type: array, items: {$ref: "#/components/schemas/CatalogModel"}}
         agents: {type: array, items: {$ref: "#/components/schemas/CatalogAgent"}}
     AgentList:
