@@ -123,7 +123,11 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 		list := []agentInfo{}
 		if chats.runs != nil {
 			for _, a := range chats.runs.config.Agents {
-				list = append(list, agentInfo{ID: a.ID, Name: a.Name})
+				mode := modeTurn
+				if a.Worker != "" {
+					mode = modeSession
+				}
+				list = append(list, agentInfo{ID: a.ID, Name: a.Name, Mode: mode})
 			}
 		}
 		return list
@@ -139,13 +143,21 @@ func newHandler(version string, store projects.Store, registrations []plugins.Re
 	if vaults, ok := store.(*projects.Vaults); ok {
 		route("GET /v1/projects/{projectId}/notes", auth.RoleUser, listNotes(vaults))
 		route("PUT /v1/projects/{projectId}/notes", auth.RoleUser, saveNote(vaults))
-		// Chat runs start containers on the router's host. Roles are not yet
-		// scoped to projects, so any user may chat in any project.
+		// Chat runs start containers on the router's host or prompt a harness
+		// worker. Roles are not yet scoped to projects, so any user may chat
+		// in any project. POST routes pass auth's cross-origin check.
 		chats.vaults = vaults
 		route("GET /v1/projects/{projectId}/chats", auth.RoleUser, chats.list)
 		route("POST /v1/projects/{projectId}/chats", auth.RoleUser, chats.create)
 		route("GET /v1/projects/{projectId}/chats/{chatId}", auth.RoleUser, chats.get)
 		route("POST /v1/projects/{projectId}/chats/{chatId}/messages", auth.RoleUser, chats.send)
+		route("GET /v1/projects/{projectId}/chats/{chatId}/events", auth.RoleUser, chats.events)
+		route("POST /v1/projects/{projectId}/chats/{chatId}/interrupt", auth.RoleUser, chats.interrupt)
+		route("GET /v1/projects/{projectId}/chats/{chatId}/permissions", auth.RoleUser, chats.permissions)
+		route("POST /v1/projects/{projectId}/chats/{chatId}/permissions/{permissionId}", auth.RoleUser, chats.reply)
+		if chats.runs != nil {
+			chats.runs.useVaults(vaults)
+		}
 	}
 	return mux
 }

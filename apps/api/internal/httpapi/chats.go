@@ -14,6 +14,7 @@ import (
 
 	"github.com/ParityH4sher/ember/apps/api/internal/agents"
 	"github.com/ParityH4sher/ember/apps/api/internal/aicatalog"
+	"github.com/ParityH4sher/ember/apps/api/internal/harness"
 	"github.com/ParityH4sher/ember/apps/api/internal/projects"
 )
 
@@ -24,49 +25,101 @@ const (
 	// router caps stdout at 64 KiB) plus its JSON encoding.
 	answerReserve = 72 << 10
 	runDeadline   = 90 * time.Second
+	// sessionDeadline bounds a session run (ADR 015).
+	sessionDeadline = 15 * time.Minute
+	sessionSettle   = 10 * time.Second
 )
 
-// ChatRuns starts chat turns in the sandbox router and tracks the ones in
-// progress. Create one per process, pass it to NewDeploymentHandler with
-// WithChatRuns, and Close it after the HTTP server has stopped.
+// ChatRuns starts chat runs and tracks the ones in progress. Turn agents run
+// once per message in the sandbox router; session agents are long-lived
+// harness sessions on a worker (ADR 015). Create one per process, pass it to
+// NewDeploymentHandler with WithChatRuns, and Close it after the HTTP server
+// has stopped.
 //
-// Run state is held in memory only. It is not a durable task record: a run
-// that is in progress when the process stops is reported as interrupted.
+// Run state is held in memory only. It is not a durable task record: a turn
+// run that is in progress when the process stops is reported as
+// interrupted; a session run keeps going in its worker and is picked up
+// again by the next GET of its chat.
 type ChatRuns struct {
 	config   *agents.Config
-	runner   agents.Runner
+	runner   agents.Runner // nil without a router socket
 	logger   *slog.Logger
 	now      func() time.Time
-	deadline time.Duration
+	deadline time.Duration // turn runs
+	// sessionDeadline bounds a session run; then the API interrupts it.
+	sessionDeadline time.Duration
+	// settle is how long an interrupted session run may take to report its
+	// end before the API records it as failed.
+	settle time.Duration
+	// retry is the first delay before resubscribing to a worker's events.
+	retry   time.Duration
+	workers map[string]*worker
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	slot   chan struct{} // the router runs one job at a time
 	wg     sync.WaitGroup
 
-	mu     sync.Mutex
-	closed bool
-	active map[string]bool // projectID + "/" + chatID
+	mu           sync.Mutex
+	closed       bool
+	streamsEnded bool
+	active       map[string]context.CancelFunc       // turn runs by projectID + "/" + chatID
+	sessions     map[string]*sessionRun              // session runs by chat key
+	subs         map[string]map[*subscriber]struct{} // browser streams by chat ID
+	store        *projects.Vaults
 }
 
-// NewChatRuns runs the configured agents with runner.
-func NewChatRuns(config *agents.Config, runner agents.Runner, logger *slog.Logger) *ChatRuns {
+// RunOption configures NewChatRuns.
+type RunOption func(*ChatRuns)
+
+// WithHarness serves the session agents of the configured worker id with h.
+// A worker without a harness offers no chats.
+func WithHarness(id string, h harness.Harness) RunOption {
+	return func(r *ChatRuns) {
+		if w, ok := r.config.Worker(id); ok && h != nil {
+			r.workers[id] = &worker{id: id, h: h, directory: w.Directory}
+		}
+	}
+}
+
+// NewChatRuns runs the configured agents: turn agents with runner, which may
+// be nil when no router is configured, and session agents with the harnesses
+// given by WithHarness. It subscribes to each worker's events at once.
+func NewChatRuns(config *agents.Config, runner agents.Runner, logger *slog.Logger, opts ...RunOption) *ChatRuns {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ChatRuns{
+	r := &ChatRuns{
 		config: config, runner: runner, logger: logger,
 		now: func() time.Time { return time.Now().UTC() }, deadline: runDeadline,
-		ctx: ctx, cancel: cancel, slot: make(chan struct{}, 1), active: map[string]bool{},
+		sessionDeadline: sessionDeadline, settle: sessionSettle, retry: time.Second,
+		workers: map[string]*worker{},
+		ctx:     ctx, cancel: cancel, slot: make(chan struct{}, 1),
+		active: map[string]context.CancelFunc{}, sessions: map[string]*sessionRun{},
+		subs: map[string]map[*subscriber]struct{}{},
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	for _, w := range r.workers {
+		r.wg.Add(1)
+		go r.follow(w)
+	}
+	return r
 }
 
-// Close cancels runs in progress, which stops their containers, and waits up
-// to wait for them to record the interruption.
+// Close cancels turn runs in progress, which stops their containers, stops
+// following workers, and waits up to wait for runs to record their outcome.
+// Session runs keep going in their workers.
 func (r *ChatRuns) Close(wait time.Duration) {
 	r.mu.Lock()
 	r.closed = true
+	for _, run := range r.sessions {
+		if run.timer != nil {
+			run.timer.Stop()
+		}
+	}
 	r.mu.Unlock()
 	r.cancel()
 	done := make(chan struct{})
@@ -78,27 +131,44 @@ func (r *ChatRuns) Close(wait time.Duration) {
 	}
 }
 
-func chatKey(projectID, chatID string) string { return projectID + "/" + chatID }
-
-// begin claims a chat for one run. It fails if the chat already has a run or
-// the runner is closing. Every successful begin is paired with one release
-// and one wg.Done; end does both for a run that never started.
-func (r *ChatRuns) begin(key string) (ok bool, closed bool) {
+// enter registers background work that Close waits for. It fails once the
+// runs are closing.
+func (r *ChatRuns) enter() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return false, true
+		return false
 	}
-	if r.active[key] {
-		return false, false
-	}
-	r.active[key] = true
 	r.wg.Add(1)
-	return true, false
+	return true
+}
+
+func chatKey(projectID, chatID string) string { return projectID + "/" + chatID }
+
+// begin claims a chat for one turn run and returns the run's context. It
+// fails if the chat already has a run or the runner is closing. Every
+// successful begin is paired with one release and one wg.Done; end does both
+// for a run that never started.
+func (r *ChatRuns) begin(key string) (ctx context.Context, ok bool, closed bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, false, true
+	}
+	if _, busy := r.active[key]; busy || r.sessions[key] != nil {
+		return nil, false, false
+	}
+	ctx, cancel := context.WithTimeout(r.ctx, r.deadline)
+	r.active[key] = cancel
+	r.wg.Add(1)
+	return ctx, true, false
 }
 
 func (r *ChatRuns) release(key string) {
 	r.mu.Lock()
+	if cancel := r.active[key]; cancel != nil {
+		cancel()
+	}
 	delete(r.active, key)
 	r.mu.Unlock()
 }
@@ -106,6 +176,17 @@ func (r *ChatRuns) release(key string) {
 func (r *ChatRuns) end(key string) {
 	r.release(key)
 	r.wg.Done()
+}
+
+// interruptTurn cancels the chat's turn run, if it has one.
+func (r *ChatRuns) interruptTurn(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cancel, ok := r.active[key]
+	if ok {
+		cancel()
+	}
+	return ok
 }
 
 // running reports whether a run holds the chat. Readers ask before reading
@@ -118,7 +199,8 @@ func (r *ChatRuns) running(key string) bool {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.active[key]
+	_, turn := r.active[key]
+	return turn || r.sessions[key] != nil
 }
 
 func (r *ChatRuns) runningNow() map[string]bool {
@@ -129,6 +211,9 @@ func (r *ChatRuns) runningNow() map[string]bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key := range r.active {
+		running[key] = true
+	}
+	for key := range r.sessions {
 		running[key] = true
 	}
 	return running
@@ -143,28 +228,49 @@ type chatAPI struct {
 	projects projects.Store
 }
 
+// Agent modes: a turn agent runs once per message in the sandbox router; a
+// session agent is a long-lived harness session (ADR 015).
+const (
+	modeTurn    = "turn"
+	modeSession = "session"
+)
+
 // agentInfo is an agent as GET /v1/agents lists it.
 type agentInfo struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
+	Mode    string `json:"mode,omitempty"`
 	Harness string `json:"harness,omitempty"`
 	Model   string `json:"model,omitempty"`
 }
 
-// chatAgent is what a chat turn needs to know about its agent.
+// chatAgent is what a chat run needs to know about its agent.
 type chatAgent struct {
-	router string           // policy name in the sandbox router
+	router string           // policy name in the sandbox router (turn agents)
 	model  *agents.ModelRef // nil when no model is configured
+	worker *worker          // the harness worker (session agents)
+}
+
+func (a chatAgent) mode() string {
+	if a.worker != nil {
+		return modeSession
+	}
+	return modeTurn
 }
 
 // resolveAgent finds an agent in the operator's agents file, then among the
-// enabled agents an admin added.
+// enabled agents an admin added. A session agent whose worker has no harness
+// is not offered.
 func (h *chatAPI) resolveAgent(id string) (chatAgent, bool) {
 	if h.runs == nil {
 		return chatAgent{}, false
 	}
 	if a, ok := h.runs.config.Agent(id); ok {
-		return chatAgent{router: a.ID}, true
+		if a.Worker == "" {
+			return chatAgent{router: a.ID}, true
+		}
+		w := h.runs.workers[a.Worker]
+		return chatAgent{worker: w}, w != nil
 	}
 	if h.catalog == nil {
 		return chatAgent{}, false
@@ -173,12 +279,12 @@ func (h *chatAPI) resolveAgent(id string) (chatAgent, bool) {
 	if !ok {
 		return chatAgent{}, false
 	}
+	// TODO(merge): catalog agents with Worker. An agent with harness
+	// opencode and a worker becomes a session agent:
+	// chatAgent{worker: h.runs.workers[r.Agent.Worker]}.
 	out := chatAgent{router: r.Agent.RouterAgent}
-	if r.Model != nil && r.Provider != nil {
-		out.model = &agents.ModelRef{
-			ID: r.Model.ID, Name: r.Model.Name, ProviderKind: r.Provider.Kind,
-			Upstream: r.Model.Upstream, Local: r.Provider.Local,
-		}
+	if r.Model != nil {
+		out.model = &agents.ModelRef{ID: r.Model.ID, Name: r.Model.Name}
 	}
 	return out, true
 }
@@ -187,7 +293,11 @@ func (h *chatAPI) listAgents(w http.ResponseWriter, _ *http.Request) {
 	list := []agentInfo{}
 	if h.runs != nil {
 		for _, a := range h.runs.config.Agents {
-			list = append(list, agentInfo{ID: a.ID, Name: a.Name})
+			mode := modeTurn
+			if a.Worker != "" {
+				mode = modeSession
+			}
+			list = append(list, agentInfo{ID: a.ID, Name: a.Name, Mode: mode})
 		}
 		if h.catalog != nil {
 			models := map[string]string{}
@@ -195,7 +305,8 @@ func (h *chatAPI) listAgents(w http.ResponseWriter, _ *http.Request) {
 				models[m.ID] = m.Name
 			}
 			for _, a := range h.catalog.EnabledAgents() {
-				list = append(list, agentInfo{ID: a.ID, Name: a.Name, Harness: a.Harness, Model: models[a.DefaultModel]})
+				// TODO(merge): mode session for catalog agents with Worker.
+				list = append(list, agentInfo{ID: a.ID, Name: a.Name, Mode: modeTurn, Harness: a.Harness, Model: models[a.DefaultModel]})
 			}
 		}
 	}
@@ -268,19 +379,51 @@ func (h *chatAPI) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, chat)
 }
 
+// chatView is a chat as GET and POST messages return it.
+type chatView struct {
+	projects.Chat
+	// Mode is the agent's mode, or empty when the agent is no longer offered.
+	Mode    string `json:"mode,omitempty"`
+	Running bool   `json:"running"`
+}
+
 func (h *chatAPI) get(w http.ResponseWriter, r *http.Request) {
 	projectID, chatID := r.PathValue("projectId"), r.PathValue("chatId")
-	running := h.runs.running(chatKey(projectID, chatID)) // before reading; see running
+	key := chatKey(projectID, chatID)
+	running := h.runs.running(key) // before reading; see running
 	chat, err := h.vaults.Chat(projectID, chatID)
 	if err != nil {
 		chatError(w, err)
 		return
 	}
+	agent, known := h.resolveAgent(chat.Agent)
+	if !running && known && agent.worker != nil && hasPending(chat) {
+		// The API restarted while a session run was active: ask the worker.
+		h.runs.recoverSession(r.Context(), h.vaults, projectID, chat, agent.worker)
+		running = h.runs.running(key)
+		if chat, err = h.vaults.Chat(projectID, chatID); err != nil {
+			chatError(w, err)
+			return
+		}
+	}
 	if !running {
 		markInterrupted(&chat)
 	}
+	view := chatView{Chat: chat, Running: running}
+	if known {
+		view.Mode = agent.mode()
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, chat)
+	writeJSON(w, http.StatusOK, view)
+}
+
+func hasPending(c projects.Chat) bool {
+	for _, m := range c.Messages {
+		if m.Status == projects.StatusPending {
+			return true
+		}
+	}
+	return false
 }
 
 // markInterrupted fails pending messages whose run no longer exists, for
@@ -325,9 +468,14 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "agents_unavailable", "this chat's agent is no longer offered on this instance")
 		return
 	}
+	if agent.worker != nil {
+		h.sendSession(w, r, chat, agent.worker, content)
+		return
+	}
 
 	key := chatKey(projectID, chatID)
-	if ok, closed := h.runs.begin(key); !ok {
+	ctx, ok, closed := h.runs.begin(key)
+	if !ok {
 		if closed {
 			agentsUnavailable(w)
 		} else {
@@ -381,8 +529,9 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started = true
-	go h.runs.run(h.vaults, projectID, chatID, pendingID, agent.router, turn)
-	writeJSON(w, http.StatusAccepted, saved)
+	h.runs.publish(projectID, chatID, harness.Event{Type: harness.RunStarted})
+	go h.runs.run(ctx, h.vaults, projectID, chatID, pendingID, agent.router, turn)
+	writeJSON(w, http.StatusAccepted, chatView{Chat: saved, Mode: modeTurn, Running: true})
 }
 
 // run waits for the agent and records its answer or a failure in place of
@@ -392,16 +541,20 @@ func (h *chatAPI) send(w http.ResponseWriter, r *http.Request) {
 // that a client which sees the answer can send the next message at once:
 // that send, and every read, waits for the vault lock and sees the result.
 // Close waits for wg, which is released only after the write.
-func (r *ChatRuns) run(vaults *projects.Vaults, projectID, chatID, messageID, agentID string, turn agents.Turn) {
+func (r *ChatRuns) run(ctx context.Context, vaults *projects.Vaults, projectID, chatID, messageID, agentID string, turn agents.Turn) {
 	key := chatKey(projectID, chatID)
 	defer r.wg.Done()
 	var once sync.Once
 	free := func() { once.Do(func() { <-r.slot; r.release(key) }) }
 	defer free() // if the result could not be recorded
-	ctx, cancel := context.WithTimeout(r.ctx, r.deadline)
-	defer cancel()
 	started := time.Now()
-	result, err := r.runner.Run(ctx, agentID, turn)
+	var result agents.Result
+	var err error
+	if r.runner == nil {
+		err = &agents.RunError{Code: agents.CodeRouterUnavailable}
+	} else {
+		result, err = r.runner.Run(ctx, agentID, turn)
+	}
 	outcome, runID := "completed", result.RunID
 	if err != nil {
 		outcome = agents.CodeFailed
@@ -409,7 +562,8 @@ func (r *ChatRuns) run(vaults *projects.Vaults, projectID, chatID, messageID, ag
 		if errors.As(err, &runErr) {
 			outcome, runID = runErr.Code, runErr.RunID
 		}
-		if r.ctx.Err() != nil {
+		// Cancelled by Close or by POST interrupt, not by the deadline.
+		if r.ctx.Err() != nil || errors.Is(ctx.Err(), context.Canceled) {
 			outcome = agents.CodeInterrupted
 		}
 	}
@@ -431,6 +585,14 @@ func (r *ChatRuns) run(vaults *projects.Vaults, projectID, chatID, messageID, ag
 		}
 		return projects.ErrChatNotFound
 	})
+	event := harness.RunFailed
+	switch outcome {
+	case "completed":
+		event = harness.RunSucceeded
+	case agents.CodeInterrupted:
+		event = harness.RunInterrupted
+	}
+	r.publish(projectID, chatID, harness.Event{Type: event})
 	// Never log message text or the router's error body.
 	r.logger.Info("chat run", "chat", chatID, "agent", agentID, "run", runID, "outcome", outcome,
 		"omitted_messages", turn.OmittedMessages, "duration_ms", time.Since(started).Milliseconds(),

@@ -37,13 +37,11 @@ type ChatRef struct {
 }
 
 // ModelRef names the model an admin chose for the agent. It carries no
-// endpoint or credential: the agent asks the model gateway for this alias.
+// endpoint or credential: the agent asks the model gateway for this model,
+// which owns providers and keys (ADR 015).
 type ModelRef struct {
-	ID           string `json:"id"`           // Ember alias, the gateway's model name
-	Name         string `json:"name"`         // label people see
-	ProviderKind string `json:"providerKind"` // anthropic, openai, ollama, openai-compatible
-	Upstream     string `json:"upstream"`     // the provider's own model ID
-	Local        bool   `json:"local"`        // served on the operator's network
+	ID   string `json:"id"`   // the gateway's model name
+	Name string `json:"name"` // label people see
 }
 
 // Turn is the document an agent receives on stdin for one chat turn. The last

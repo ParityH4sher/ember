@@ -93,7 +93,7 @@ func TestAIAdminConfiguresAgentForChat(t *testing.T) {
 	listed := decode[struct {
 		Agents []agentInfo `json:"agents"`
 	}](t, send(user, "GET", "/v1/agents", ""))
-	if len(listed.Agents) != 3 || listed.Agents[2] != (agentInfo{ID: "claude", Name: "Claude Code", Harness: "claude-code", Model: "Claude Sonnet"}) {
+	if len(listed.Agents) != 3 || listed.Agents[2] != (agentInfo{ID: "claude", Name: "Claude Code", Mode: "turn", Harness: "claude-code", Model: "Claude Sonnet"}) {
 		t.Fatalf("agents = %+v", listed.Agents)
 	}
 
@@ -105,7 +105,7 @@ func TestAIAdminConfiguresAgentForChat(t *testing.T) {
 	if call.agent != "claude-code-image" {
 		t.Fatalf("router agent = %q; want the catalog agent's routerAgent", call.agent)
 	}
-	want := agents.ModelRef{ID: "sonnet", Name: "Claude Sonnet", ProviderKind: "anthropic", Upstream: "claude-sonnet-x"}
+	want := agents.ModelRef{ID: "sonnet", Name: "Claude Sonnet"}
 	if call.turn.Model == nil || *call.turn.Model != want {
 		t.Fatalf("turn model = %+v; want %+v", call.turn.Model, want)
 	}
