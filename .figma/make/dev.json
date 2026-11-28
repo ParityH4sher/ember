@@ -1,0 +1,4 @@
+{
+  "installOn": ["website/package.json", "website/package-lock.json"],
+  "restartOn": ["website/docusaurus.config.js", "website/sidebars.js"]
+}
