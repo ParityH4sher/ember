@@ -1,0 +1,10 @@
+{
+  "description": "Provides setup and verification workflows for deploying imported Figma Make projects and preparing preview environments.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
